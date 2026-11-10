@@ -1,0 +1,12 @@
+{
+  "name": "codex-context-handoff",
+  "version": "0.1.0",
+  "description": "Continue long Codex CLI tasks in a fresh chat in the same Herdr terminal.",
+  "author": {
+    "name": "ulttla",
+    "url": "https://github.com/ulttla"
+  },
+  "repository": "https://github.com/ulttla/gun-marketplace",
+  "license": "MIT",
+  "hooks": "./hooks/hooks.json"
+}

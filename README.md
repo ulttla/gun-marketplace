@@ -1,6 +1,6 @@
 # gun-marketplace
 
-Claude Code plugins by [ulttla](https://github.com/ulttla), grouped by category. The repository is a plugin marketplace: add it once, then install any plugin by name.
+Claude Code and Codex plugins by [ulttla](https://github.com/ulttla). Add the marketplace to your CLI, then install a plugin by name.
 
 This is an independent personal project. It is not affiliated with, endorsed by, or sponsored by Anthropic. Claude is a trademark of Anthropic, PBC.
 
@@ -10,7 +10,7 @@ This is an independent personal project. It is not affiliated with, endorsed by,
 
 ## English
 
-### Plugins
+### Claude Code plugins
 
 | Category | Plugin | What it does | Where it works |
 | :- | :- | :- | :- |
@@ -23,7 +23,7 @@ This is an independent personal project. It is not affiliated with, endorsed by,
 
 Each category's README has the details, options and requirements: [mods](plugins/mods/README.md), [herdr](plugins/herdr/README.md).
 
-### Install
+### Install Claude Code plugins
 
 A plugin is code that runs with your permissions: it can read and write your files, start processes, and make network requests. Read the source before you install.
 
@@ -40,6 +40,17 @@ claude plugin install context-meter@gun-marketplace
 ```
 
 In a Claude Code session the same commands are `/plugin marketplace add ulttla/gun-marketplace` and `/plugin install context-meter@gun-marketplace`. A plugin loads the next time you start a session; in a session that is already open, run `/reload-plugins`.
+
+### Codex plugins
+
+[Codex Context Handoff](plugins/codex/codex-context-handoff) starts a fresh Codex chat in the same Herdr terminal when the active context exceeds 40% and work remains. Existing Herdr workers keep their parent terminal.
+
+```bash
+codex plugin marketplace add ulttla/gun-marketplace
+codex plugin add codex-context-handoff@gun-marketplace
+```
+
+See the [setup guide](plugins/codex/codex-context-handoff/README.md) for hook review and opt-in.
 
 ### Moving from claude-mod-repo
 
@@ -67,7 +78,7 @@ Options you set (`/plugin configure`) belong to the old plugin name, so set them
 
 ## 한국어
 
-### 플러그인
+### Claude Code 플러그인
 
 | 분류 | 플러그인 | 하는 일 | 동작하는 곳 |
 | :- | :- | :- | :- |
@@ -80,7 +91,7 @@ Options you set (`/plugin configure`) belong to the old plugin name, so set them
 
 자세한 설명, 옵션, 요구 사항은 분류별 README에 있습니다: [mods](plugins/mods/README.md), [herdr](plugins/herdr/README.md).
 
-### 설치
+### Claude Code 플러그인 설치
 
 플러그인은 내 권한으로 실행되는 코드입니다. 파일을 읽고 쓰고, 프로세스를 띄우고, 네트워크 요청을 보낼 수 있습니다. 설치하기 전에 소스를 읽어 보세요.
 
@@ -97,6 +108,17 @@ claude plugin install context-meter@gun-marketplace
 ```
 
 Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add ulttla/gun-marketplace`, `/plugin install context-meter@gun-marketplace`로 입력합니다. 플러그인은 다음에 세션을 시작할 때 로드됩니다. 이미 열린 세션에서는 `/reload-plugins`를 실행합니다.
+
+### Codex 플러그인
+
+[Codex Context Handoff](plugins/codex/codex-context-handoff)는 컨텍스트 사용량이 40%를 넘고 할 일이 남아 있으면 같은 Herdr 터미널의 새 Codex 대화에서 이어갑니다. 실행 중인 Herdr 워커는 기존 부모 터미널에 연결된 상태로 유지됩니다.
+
+```bash
+codex plugin marketplace add ulttla/gun-marketplace
+codex plugin add codex-context-handoff@gun-marketplace
+```
+
+훅 검토와 활성화 방법은 [설정 가이드](plugins/codex/codex-context-handoff/README.md)를 참고하세요.
 
 ### claude-mod-repo에서 옮기기
 

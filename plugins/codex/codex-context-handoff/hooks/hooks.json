@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/context_handoff.py\"",
+            "statusMessage": "Checking context for handoff",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/context_handoff.py\"",
+            "statusMessage": "Confirming context handoff",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

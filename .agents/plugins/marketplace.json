@@ -1,0 +1,20 @@
+{
+  "name": "gun-marketplace",
+  "interface": {
+    "displayName": "Gun Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "codex-context-handoff",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex/codex-context-handoff"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
