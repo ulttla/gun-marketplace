@@ -1,0 +1,9 @@
+{
+  "name": "herdr-bg-status",
+  "version": "0.1.0",
+  "description": "In herdr, keeps a Claude Code session shown as working while its background shells, agents or backgrounded MCP calls still run after the turn ends",
+  "author": {
+    "name": "ulttla"
+  },
+  "keywords": ["herdr", "status", "background", "terminal"]
+}

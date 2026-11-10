@@ -1,0 +1,16 @@
+{
+  "description": "herdr-bg-status: after each turn, report working to herdr while background work remains",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/herdr-bg-status.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

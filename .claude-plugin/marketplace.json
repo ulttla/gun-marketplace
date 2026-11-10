@@ -1,36 +1,47 @@
 {
-  "name": "claude-mod-repo",
+  "name": "gun-marketplace",
   "owner": {
     "name": "ulttla"
   },
   "metadata": {
-    "description": "Small Claude Code mods: a context and plan-limit meter above the prompt, auto-pin for new desktop sessions and unpin when one ends, and an automatic hand-off when the context fills up (one for the desktop app, one for the terminal)"
+    "description": "Claude Code plugins by ulttla, grouped by category: mods that change how Claude Code looks and behaves, and herdr integrations"
   },
   "plugins": [
     {
       "name": "context-meter",
-      "source": "./context-meter",
+      "source": "./plugins/mods/context-meter",
+      "category": "mods",
       "description": "Shows the git branch, context window usage, what the last turn added, and plan limit usage above the prompt"
     },
     {
       "name": "auto-pin",
-      "source": "./auto-pin",
+      "source": "./plugins/mods/auto-pin",
+      "category": "mods",
       "description": "Pins a new session in the desktop app's sidebar as it starts"
     },
     {
       "name": "context-handoff",
-      "source": "./context-handoff",
+      "source": "./plugins/mods/context-handoff",
+      "category": "mods",
       "description": "For the desktop app: past a context threshold, records a hand-off and continues from the notes in a new desktop-app session (or after a compaction in place, or the app's clear)"
     },
     {
       "name": "context-handoff-cli",
-      "source": "./context-handoff-cli",
+      "source": "./plugins/mods/context-handoff-cli",
+      "category": "mods",
       "description": "For the terminal: past a context threshold, records a hand-off, starts a fresh session in the same terminal with /clear, and continues from the notes"
     },
     {
       "name": "session-end-unpin",
-      "source": "./session-end-unpin",
+      "source": "./plugins/mods/session-end-unpin",
+      "category": "mods",
       "description": "Unpins the session from the desktop app's sidebar once you ask to end it and Claude finds nothing left"
+    },
+    {
+      "name": "herdr-bg-status",
+      "source": "./plugins/herdr/herdr-bg-status",
+      "category": "herdr",
+      "description": "In herdr, keeps a Claude Code session shown as working while its background shells, agents or backgrounded MCP calls still run after the turn ends"
     }
   ]
 }
