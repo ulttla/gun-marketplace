@@ -18,7 +18,19 @@
           {
             "type": "command",
             "command": "python3 \"${PLUGIN_ROOT}/hooks/context_handoff.py\"",
-            "statusMessage": "Confirming context handoff",
+            "statusMessage": "Checking context handoff",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/context_handoff.py\"",
+            "statusMessage": "Checking context for handoff",
             "timeout": 10
           }
         ]

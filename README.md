@@ -51,7 +51,7 @@ codex plugin marketplace add ulttla/gun-marketplace
 codex plugin add codex-context-handoff@gun-marketplace
 ```
 
-See the [setup guide](plugins/codex/codex-context-handoff/README.md) for hook review and opt-in.
+See the [setup guide](plugins/codex/codex-context-handoff/README.md) for hook review, the `codex` launcher that opts a Herdr terminal in, and the per-chat `handoff off|on|status` prompts.
 
 [herdr-usage](plugins/herdr/herdr-usage) is in both catalogs. In Codex, install it with `codex plugin add herdr-usage@gun-marketplace`, then ask Codex to install herdr-usage.
 
@@ -122,7 +122,7 @@ codex plugin marketplace add ulttla/gun-marketplace
 codex plugin add codex-context-handoff@gun-marketplace
 ```
 
-훅 검토와 활성화 방법은 [설정 가이드](plugins/codex/codex-context-handoff/README.md)를 참고하세요.
+훅 검토, Herdr 터미널에서 자동으로 활성화하는 `codex` 런처, 대화별 `handoff off|on|status` 명령은 [설정 가이드](plugins/codex/codex-context-handoff/README.md)를 참고하세요.
 
 [herdr-usage](plugins/herdr/herdr-usage)는 두 카탈로그에 모두 있습니다. Codex에서는 `codex plugin add herdr-usage@gun-marketplace`로 설치한 뒤 Codex에게 herdr-usage 설치를 요청합니다.
 
