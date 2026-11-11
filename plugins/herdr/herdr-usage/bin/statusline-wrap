@@ -1,0 +1,31 @@
+#!/bin/sh
+# statusline-wrap <claude|agy> [base64 original command]
+# Runs the original statusline command with the same stdin bytes, leaves its
+# stdout, stderr and exit code untouched, then hands the stdin to the capture
+# in the background (output detached, errors silenced). The original command
+# travels in argv so a lost state file can never break the statusline.
+src=$1
+enc=${2-}
+umask 077
+home=${HERDR_USAGE_HOME:-@USAGE_HOME@}
+node=${HERDR_USAGE_NODE:-@NODE@}
+tmp=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/herdr-usage-sl.XXXXXX" 2>/dev/null) || tmp=
+cmd=
+if [ -n "$enc" ]; then cmd=$(printf '%s' "$enc" | /usr/bin/base64 -d 2>/dev/null) || cmd=; fi
+if [ -z "$tmp" ]; then
+  # No temp file: behave exactly like the original, skip the capture.
+  if [ -n "$cmd" ]; then /bin/sh -c "$cmd"; exit $?; fi
+  /bin/cat >/dev/null; exit 0
+fi
+trap '/bin/rm -f "$tmp"; exit 143' TERM
+trap '/bin/rm -f "$tmp"; exit 130' INT
+trap '/bin/rm -f "$tmp"; exit 129' HUP
+/bin/cat > "$tmp"
+rc=0
+if [ -n "$cmd" ]; then
+  /bin/sh -c "$cmd" < "$tmp"
+  rc=$?
+fi
+trap - TERM INT HUP
+( HERDR_USAGE_HOME=$home "$node" "$home/bin/herdr-usage" capture "$src" < "$tmp" >/dev/null 2>&1; /bin/rm -f "$tmp" ) >/dev/null 2>&1 </dev/null &
+exit $rc

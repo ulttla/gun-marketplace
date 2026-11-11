@@ -11,6 +11,7 @@ Plugins that connect Claude Code to [herdr](https://herdr.dev), the terminal and
 | Plugin | What it does |
 | :- | :- |
 | [`herdr-bg-status`](herdr-bg-status) | Keeps a Claude Code session shown as **working** in herdr while its background work still runs after the turn ends |
+| [`herdr-usage`](herdr-usage) | Shows Codex, Claude Code, Antigravity and Ollama Cloud subscription usage in the Herdr app's status bar, with a detail popup |
 
 ### herdr-bg-status
 
@@ -55,6 +56,16 @@ claude plugin install herdr-bg-status@gun-marketplace
 - Backgrounded MCP calls made inside a subagent are not tracked.
 - What it did and why is logged to `~/.cache/claude-herdr-bg/watch.log`.
 
+### herdr-usage
+
+A status bar for the Herdr app (a copy of Herdr's main layout) that adds how much of each subscription window is left, and a popup with every window, its reset time and when the value was observed. The plugin ships a skill; nothing is installed until you ask for it. It works with Claude Code and Codex.
+
+```bash
+claude plugin install herdr-usage@gun-marketplace     # or: codex plugin add herdr-usage@gun-marketplace
+```
+
+Then ask the agent to install herdr-usage. Requirements, what it changes, update and uninstall: [herdr-usage/README.md](herdr-usage/README.md).
+
 ---
 
 ## 한국어
@@ -62,6 +73,7 @@ claude plugin install herdr-bg-status@gun-marketplace
 | 플러그인 | 하는 일 |
 | :- | :- |
 | [`herdr-bg-status`](herdr-bg-status) | 턴이 끝난 뒤에도 백그라운드 작업이 돌고 있으면 herdr에서 Claude Code 세션을 **working**으로 계속 보여 줍니다 |
+| [`herdr-usage`](herdr-usage) | Codex, Claude Code, Antigravity, Ollama Cloud 구독 사용량을 Herdr 앱 하단 바와 상세 팝업에 보여 줍니다 |
 
 ### herdr-bg-status
 
@@ -105,3 +117,13 @@ claude plugin install herdr-bg-status@gun-marketplace
 - Claude Code가 셸 스냅샷 이름을 붙이는 방식, 백그라운드 작업 안내 문구, OSC 7501 형식에 기대어 동작합니다. Claude Code 업데이트로 이것들이 바뀌면 작업을 찾지 못하게 됩니다. 그때 herdr는 Claude Code 자체 상태로 돌아갈 뿐, 지금보다 나빠지지는 않습니다.
 - 서브에이전트 안에서 백그라운드로 넘어간 MCP 호출은 추적하지 않습니다.
 - 무엇을 했고 왜 했는지는 `~/.cache/claude-herdr-bg/watch.log`에 남습니다.
+
+### herdr-usage
+
+Herdr 앱의 하단 바(Herdr 기본 main 레이아웃의 복사본)에 구독 한도 창마다 남은 비율을 더하고, 클릭하면 모든 창의 리셋 시각과 값을 받은 시각을 보여 주는 팝업을 엽니다. 플러그인에는 스킬이 들어 있고, 요청하기 전에는 아무것도 설치하지 않습니다. Claude Code와 Codex에서 쓸 수 있습니다.
+
+```bash
+claude plugin install herdr-usage@gun-marketplace     # 또는: codex plugin add herdr-usage@gun-marketplace
+```
+
+그다음 에이전트에게 herdr-usage 설치를 요청합니다. 요구 사항, 바뀌는 것, 업데이트와 제거: [herdr-usage/README.md](herdr-usage/README.md#한국어)

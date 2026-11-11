@@ -1,0 +1,14 @@
+{
+  "name": "herdr-usage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Subscription usage bar and detail popup for the Herdr app (Codex, Claude Code, Antigravity, Ollama)",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

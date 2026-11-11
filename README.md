@@ -20,6 +20,7 @@ This is an independent personal project. It is not affiliated with, endorsed by,
 | [mods](plugins/mods) | [`context-handoff-cli`](plugins/mods/context-handoff-cli) | Once the context window is 40% full, has Claude write hand-off notes, then starts a fresh session in the same terminal with `/clear` and continues from them | Terminal |
 | [mods](plugins/mods) | [`session-end-unpin`](plugins/mods/session-end-unpin) | When you ask to end a session and Claude finds nothing left, unpins it from the sidebar | The Desktop app's Code tab |
 | [herdr](plugins/herdr) | [`herdr-bg-status`](plugins/herdr/herdr-bg-status) | Keeps a session shown as working in [herdr](https://herdr.dev) while its background shells, agents or backgrounded MCP calls still run after the turn ends | Terminal, inside herdr |
+| [herdr](plugins/herdr) | [`herdr-usage`](plugins/herdr/herdr-usage) | Shows Codex, Claude Code, Antigravity and Ollama Cloud subscription usage in the Herdr app's status bar, with a detail popup. Its skill installs it when you ask; also for Codex | The Herdr app (macOS, Linux) |
 
 Each category's README has the details, options and requirements: [mods](plugins/mods/README.md), [herdr](plugins/herdr/README.md).
 
@@ -51,6 +52,8 @@ codex plugin add codex-context-handoff@gun-marketplace
 ```
 
 See the [setup guide](plugins/codex/codex-context-handoff/README.md) for hook review and opt-in.
+
+[herdr-usage](plugins/herdr/herdr-usage) is in both catalogs. In Codex, install it with `codex plugin add herdr-usage@gun-marketplace`, then ask Codex to install herdr-usage.
 
 ### Moving from claude-mod-repo
 
@@ -88,6 +91,7 @@ Options you set (`/plugin configure`) belong to the old plugin name, so set them
 | [mods](plugins/mods) | [`context-handoff-cli`](plugins/mods/context-handoff-cli) | 컨텍스트 창이 40% 차면 Claude가 인계 기록을 쓰게 하고, 같은 터미널에서 `/clear`로 새 세션을 시작해 기록을 읽어 이어감 | 터미널 |
 | [mods](plugins/mods) | [`session-end-unpin`](plugins/mods/session-end-unpin) | 세션 종료를 요청했을 때 Claude가 남은 일이 없다고 판단하면 사이드바 고정을 해제 | 데스크톱 앱 Code 탭 |
 | [herdr](plugins/herdr) | [`herdr-bg-status`](plugins/herdr/herdr-bg-status) | 턴이 끝난 뒤에도 백그라운드 셸·에이전트·백그라운드로 넘어간 MCP 호출이 돌고 있으면 [herdr](https://herdr.dev)에서 세션을 working으로 계속 표시 | 터미널(herdr 안) |
+| [herdr](plugins/herdr) | [`herdr-usage`](plugins/herdr/herdr-usage) | Codex, Claude Code, Antigravity, Ollama Cloud 구독 사용량을 Herdr 앱 하단 바와 상세 팝업에 표시. 요청하면 플러그인의 스킬이 설치함. Codex용도 있음 | Herdr 앱(macOS, Linux) |
 
 자세한 설명, 옵션, 요구 사항은 분류별 README에 있습니다: [mods](plugins/mods/README.md), [herdr](plugins/herdr/README.md).
 
@@ -119,6 +123,8 @@ codex plugin add codex-context-handoff@gun-marketplace
 ```
 
 훅 검토와 활성화 방법은 [설정 가이드](plugins/codex/codex-context-handoff/README.md)를 참고하세요.
+
+[herdr-usage](plugins/herdr/herdr-usage)는 두 카탈로그에 모두 있습니다. Codex에서는 `codex plugin add herdr-usage@gun-marketplace`로 설치한 뒤 Codex에게 herdr-usage 설치를 요청합니다.
 
 ### claude-mod-repo에서 옮기기
 

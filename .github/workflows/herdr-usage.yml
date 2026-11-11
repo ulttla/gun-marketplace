@@ -1,0 +1,40 @@
+name: herdr-usage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/herdr/herdr-usage/**"
+      - ".claude-plugin/marketplace.json"
+      - ".agents/plugins/marketplace.json"
+      - ".github/workflows/herdr-usage.yml"
+  pull_request:
+    paths:
+      - "plugins/herdr/herdr-usage/**"
+      - ".claude-plugin/marketplace.json"
+      - ".agents/plugins/marketplace.json"
+      - ".github/workflows/herdr-usage.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Catalogs and manifests
+        run: node plugins/herdr/herdr-usage/test/catalog-check.mjs
+      - name: Syntax of the mods
+        working-directory: plugins/herdr/herdr-usage
+        run: for f in mod/*/main.js mod/shared/fmt.js; do node --check "$f"; done
+      - name: Tests (synthetic fixtures, temporary HOME, stub herdr-app; no credentials or network)
+        working-directory: plugins/herdr/herdr-usage
+        run: node --test test/*.test.mjs
