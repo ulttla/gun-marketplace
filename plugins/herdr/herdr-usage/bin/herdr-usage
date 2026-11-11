@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+// herdr-usage snapshot [--due|--refresh|--cached]   print the normalized snapshot JSON
+// herdr-usage capture <claude|agy>                   statusline stdin -> per-session capture (silent)
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Herdr's exec passes no environment of ours: the usage home is this file's grandparent.
+process.env.HERDR_USAGE_HOME ||= path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const { captureFromStdin } = await import("../lib/capture.mjs");
+const { snapshotCommand } = await import("../lib/snapshot.mjs");
+
+const [cmd, arg] = process.argv.slice(2);
+if (cmd === "capture") {
+  try { process.exitCode = captureFromStdin(arg); } catch { process.exitCode = 0; }
+} else if (cmd === "snapshot") {
+  const mode = arg === "--refresh" ? "refresh" : arg === "--cached" ? "cached" : "due";
+  const snap = await snapshotCommand(mode);
+  process.stdout.write(JSON.stringify(snap) + "\n");
+} else {
+  process.stderr.write("usage: herdr-usage snapshot [--due|--refresh|--cached] | capture <claude|agy>\n");
+  process.exitCode = 2;
+}
