@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""codex-context-handoff launcher shim.
+
+Installed ahead of the real `codex` on PATH. Inside a Herdr terminal it starts
+interactive Codex (bare, `resume`, `fork`) with `--no-daemon` and
+CODEX_CONTEXT_HANDOFF=1 so the handoff hooks run in the foreground process.
+Everything else, and CODEX_CONTEXT_HANDOFF=0, passes through unchanged.
+"""
+
+import os
+import re
+import sys
+
+MARKER = b"codex-context-handoff launcher shim"
+TERMINAL = re.compile(r"t[0-9a-z]+\Z")
+VALUE_OPTIONS = {
+    "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env",
+    "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox",
+    "-C", "--cd", "--add-dir", "-a", "--ask-for-approval",
+}
+MULTI_VALUE_OPTIONS = {"-i", "--image"}
+SUBCOMMANDS = {
+    "agents", "exec", "e", "review", "login", "logout", "mcp", "plugin", "app-server",
+    "remote-control", "app", "completion", "update", "doctor", "sandbox", "debug", "apply",
+    "a", "resume", "queue", "archive", "delete", "migrate-rollouts", "migrate-nfs-db",
+    "unarchive", "fork", "cloud", "exec-server", "features", "help", "mcp-server",
+}
+INTERACTIVE = {"resume", "fork"}
+PASSTHROUGH_FLAGS = {"-h", "--help", "-V", "--version", "--remote"}
+
+
+def is_shim(path, own):
+    try:
+        if os.path.samefile(path, own):
+            return True
+        with open(path, "rb") as stream:
+            return MARKER in stream.read(4096)
+    except OSError:
+        return True
+
+
+def real_codex(own):
+    for folder in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = os.path.join(folder or ".", "codex")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK) and not is_shim(candidate, own):
+            return candidate
+    return None
+
+
+def options(args):
+    """Option tokens before `--`; values of value-taking options are skipped."""
+    position = 0
+    while position < len(args) and args[position] != "--":
+        token = args[position]
+        if token.startswith("-"):
+            yield position, token
+            if token.split("=", 1)[0] in VALUE_OPTIONS and "=" not in token:
+                position += 1
+        position += 1
+
+
+def launch_plan(args):
+    """Return the index where --no-daemon goes, -1 if already present, or None to pass through."""
+    if any(token.split("=", 1)[0] in PASSTHROUGH_FLAGS for _, token in options(args)):
+        return None  # help, version and remote modes, wherever they appear
+    position = 0
+    while position < len(args) and args[position] != "--":
+        token = args[position]
+        name = token.split("=", 1)[0]
+        if name in VALUE_OPTIONS and "=" not in token:
+            position += 1  # the value is the next token
+        elif name in MULTI_VALUE_OPTIONS:
+            position += "=" not in token
+            # -i takes 1.. values, so later bare words may be images, a prompt or a subcommand.
+            while position + 1 < len(args) and not args[position + 1].startswith("-"):
+                if args[position + 1] in SUBCOMMANDS:
+                    return None
+                position += 1
+        elif not token.startswith("-"):
+            if token in INTERACTIVE:
+                # resume/fork have their own --no-daemon (a top-level one may not reach them).
+                rest = args[position + 1:]
+                return -1 if any(t == "--no-daemon" for _, t in options(rest)) else position + 1
+            if token in SUBCOMMANDS:
+                return None
+            break  # the interactive prompt
+        position += 1
+    return -1 if any(t == "--no-daemon" for _, t in options(args)) else 0
+
+
+def main():
+    own = os.path.realpath(__file__)
+    real = real_codex(own)
+    if not real:
+        print("codex launcher shim: the real codex was not found on PATH", file=sys.stderr)
+        return 127
+    args = sys.argv[1:]
+    env = dict(os.environ)
+    plan = None
+    if env.get("CODEX_CONTEXT_HANDOFF") != "0" and TERMINAL.fullmatch(env.get("HC_TERMINAL_ID", "")):
+        plan = launch_plan(args)
+    if plan is not None:
+        env["CODEX_CONTEXT_HANDOFF"] = "1"
+        if plan >= 0:
+            args = args[:plan] + ["--no-daemon"] + args[plan:]
+    os.execve(real, [real, *args], env)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
