@@ -1,0 +1,13 @@
+{
+  "name": "herdr-usage",
+  "version": "0.1.0",
+  "description": "Subscription usage for Codex, Claude Code, Antigravity and Ollama Cloud in the Herdr app's status bar, with a detail popup.",
+  "author": {
+    "name": "ulttla",
+    "url": "https://github.com/ulttla"
+  },
+  "repository": "https://github.com/ulttla/gun-marketplace",
+  "license": "MIT",
+  "keywords": ["herdr", "usage", "rate-limits", "status-bar"],
+  "skills": "./skills/"
+}

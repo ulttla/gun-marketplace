@@ -42,6 +42,12 @@
       "source": "./plugins/herdr/herdr-bg-status",
       "category": "herdr",
       "description": "In herdr, keeps a Claude Code session shown as working while its background shells, agents or backgrounded MCP calls still run after the turn ends"
+    },
+    {
+      "name": "herdr-usage",
+      "source": "./plugins/herdr/herdr-usage",
+      "category": "herdr",
+      "description": "Shows Codex, Claude Code, Antigravity and Ollama Cloud subscription usage in the Herdr app's status bar, with a detail popup; its skill installs, updates, checks and removes it"
     }
   ]
 }
