@@ -18,7 +18,7 @@ There is no daemon, no launchd job, no model call and no new API key. It needs n
 
 ### Requirements
 
-- macOS or Linux. Windows is not supported. Tested on macOS with Herdr 0.1.15; on Linux only the automated tests run.
+- macOS, Linux or Windows. Tested on macOS with Herdr 0.1.15 and on Windows; Linux runs the automated tests. Windows support was added in 0.1.1.
 - The Herdr app, opened at least once (`herdr-app` on `PATH`, in `~/.local/bin`, or set `HERDR_APP_BIN`).
 - Node.js 22 or newer (tested with 24).
 - Any of the CLIs whose usage you want: Codex CLI, Claude Code, Antigravity, Ollama. Missing ones are shown as waiting or not connected.
@@ -62,6 +62,8 @@ Environment it follows:
 | `CODEX_HOME` | Codex's home, for its session files |
 | `HERDR_USAGE_HOME` | Where the collector lives (default `<Herdr home>/usage`) |
 
+On Windows, the installer finds native `.exe` programs, including the standard native and npm Codex installations. For a custom Codex location, set `HERDR_USAGE_CODEX` to its absolute `codex.exe` path; `.cmd` and `.ps1` launchers are not supported. Windows uses a Node.js statusline wrapper and terminates only the temporary app-server process tree. See [Windows setup](WINDOWS.md).
+
 The settings files, `node`, `codex` and `CODEX_HOME` found at install time are recorded in `<Herdr home>/usage/install.json`, because Herdr runs the collector without your shell environment.
 
 ### Update
@@ -82,8 +84,10 @@ A re-run updates in place. It keeps the layout you have shown, your edits to the
 | `<Herdr home>/usage/{bin,lib,cache,state}` | The collector and statusline wrapper; captured data and state (0700 folders, 0600 files) |
 | `<Herdr home>/mods/gun-usage-bar`, `gun-usage-detail` | The status bar and the popup |
 | `<Herdr home>/layouts/gun-usage.json` | A copy of Herdr's main layout whose status block is `gun-usage-bar`. Spaces, tabs and panes stay as they are when it is shown. Sizes you dragged in `main` are not copied |
-| Claude Code `settings.json` | Only `statusLine`. The command becomes `/bin/sh '<usage>/bin/statusline-wrap' claude <base64 of the original>`: your original runs first with the same input, and its output and exit code pass through unchanged |
+| Claude Code `settings.json` | Only `statusLine`. On macOS/Linux the command becomes `/bin/sh '<usage>/bin/statusline-wrap' claude <base64 of the original>`: your original runs first with the same input, and its output and exit code pass through unchanged |
 | `~/.gemini/antigravity-cli/settings.json` | Only `statusLine`, as above. Without an original command it is capture-only, with `stack_with_default: true` so agy's built-in line stays |
+
+On Windows, `statusLine.command` runs the bundled `statusline-wrap.mjs` with Node.js. It passes stdin to the original command, preserves its output and exit code, and then captures the quota fields locally. The collector uses this computer's sessions and credentials even when viewing a remote machine in Herdr.
 
 A CLI whose config folder does not exist is skipped. If the folder exists but `settings.json` does not, the file is created and removed again on uninstall if nothing else was added. A settings file is rewritten only when that keeps its formatting; otherwise the installer stops before changing anything. The original value of each `statusLine` key is kept in `usage/state/<cli>-statusline.orig.json`; the whole settings file is never copied.
 
@@ -129,7 +133,7 @@ You can always switch back to Herdr's layout with `ctrl-shift-l` or `herdr-app d
 node --test test/*.test.mjs
 ```
 
-Synthetic fixtures, a temporary `HOME` and a stub `herdr-app`: no real settings, credentials or network.
+On macOS/Linux, run the command above. On Windows run `node --test test/parse.test.mjs test/windows.test.mjs`. CI runs synthetic parser and native-wrapper tests on Windows; the additional isolated installer integration test runs when `herdr-app` is installed. Tests use temporary settings, not real credentials or network. The Unix shell-based setup suites remain on macOS/Linux.
 
 ### License
 
@@ -145,9 +149,9 @@ Synthetic fixtures, a temporary `HOME` and a stub `herdr-app`: no real settings,
 
 ### 요구 사항
 
-- macOS 또는 Linux. Windows는 지원하지 않습니다. macOS의 Herdr 0.1.15에서 시험했고, Linux에서는 자동 테스트만 돕니다.
+- macOS, Linux 또는 Windows. macOS의 Herdr 0.1.15와 Windows에서 시험했고, Linux에서는 자동 테스트를 실행합니다. Windows 지원은 0.1.1에서 추가했습니다.
 - 한 번 이상 연 Herdr 앱(`herdr-app`이 `PATH`나 `~/.local/bin`에 있거나 `HERDR_APP_BIN`으로 지정)
-- Node.js 22 이상(24에서 시험)
+- Node.js 22 이상(24와 25에서 시험)
 - 사용량을 보고 싶은 CLI: Codex CLI, Claude Code, Antigravity, Ollama. 없는 것은 대기나 연결 필요로 표시됩니다.
 
 ### 설치
@@ -190,6 +194,8 @@ codex plugin marketplace upgrade gun-marketplace && codex plugin add herdr-usage
 ```
 
 다시 실행하면 제자리에서 업데이트합니다. 지금 보이는 레이아웃, `gun-usage` 레이아웃을 고친 내용, 저장된 원래 statusLine, 수집한 데이터를 유지하며 래퍼를 두 번 감싸지 않습니다.
+
+Windows 설치기는 기본 native/npm Codex 설치의 `codex.exe`를 찾습니다. 별도 위치라면 `HERDR_USAGE_CODEX`에 절대 경로를 지정하세요(`.cmd`·`.ps1` 런처 제외). Windows는 Node.js 상태줄 래퍼를 쓰고, 임시 app-server 프로세스 트리만 종료합니다. 수집 대상은 이 컴퓨터의 세션과 계정이며 Herdr에서 원격 Mac을 선택해도 바뀌지 않습니다. [Windows 안내](WINDOWS.md)를 참고하세요.
 
 ### 바뀌는 것
 

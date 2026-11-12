@@ -15,7 +15,7 @@ import { installStatusLine, checkEditable } from "./lib/settings.mjs";
 import { claudeSettingsPath, agySettingsPath } from "./lib/snapshot.mjs";
 import { readJson, writeAtomic } from "./lib/util.mjs";
 import {
-  VERSION, MIN_NODE, MODS, LAYOUT, paths, stableNode, supportedPlatform, which, findHerdrApp, herdr, shownLayout, nodeMajor,
+  VERSION, MIN_NODE, MODS, LAYOUT, paths, stableNode, supportedPlatform, findCodex, findHerdrApp, herdr, shownLayout, nodeMajor,
   isOurMod, isOurUsageHome, isOurLayout, pointStatusAtBar,
 } from "./lib/setup.mjs";
 
@@ -30,7 +30,7 @@ function fail(msg, hint) {
 
 // ---- 1. Checks (no writes) -------------------------------------------------
 for (const a of args) if (!KNOWN.includes(a)) fail(`unknown option ${a}`, `options: ${KNOWN.join(" ")}`);
-if (!supportedPlatform()) fail(`unsupported platform ${process.platform}`, "herdr-usage supports macOS and Linux only.");
+if (!supportedPlatform()) fail(`unsupported platform ${process.platform}`, "herdr-usage supports macOS, Linux and Windows.");
 if (Number(process.versions.node.split(".")[0]) < MIN_NODE) fail(`Node.js ${process.versions.node} is too old`, `Run it with Node.js ${MIN_NODE} or newer.`);
 
 const P = paths();
@@ -78,7 +78,8 @@ if (!args.has("--skip-layout")) {
 }
 
 // Stage both mods with the paths filled in, and let herdr-app check them.
-const sub = (s) => s.replaceAll("@NODE@", node).replaceAll("@USAGE_HOME@", P.usage);
+// Forward slashes are valid Windows paths and safe inside JS and shell literals.
+const sub = (s) => s.replaceAll("@NODE@", node.replaceAll("\\", "/")).replaceAll("@USAGE_HOME@", P.usage.replaceAll("\\", "/"));
 function copyTree(from, to, transform) {
   fs.mkdirSync(to, { recursive: true });
   for (const e of fs.readdirSync(from, { withFileTypes: true })) {
@@ -134,7 +135,7 @@ cleanStage();
 
 // statusLine wrappers (key-only)
 const settings = { ...(prevInfo.settings ?? {}) };
-const wrapPath = path.join(P.usage, "bin", "statusline-wrap");
+const wrapPath = path.join(P.usage, "bin", process.platform === "win32" ? "statusline-wrap.mjs" : "statusline-wrap");
 for (const p of settingsPlan) {
   if (p.skip) { log(`${p.src} statusLine: ${p.skip}`); continue; }
   try {
@@ -178,7 +179,7 @@ writeAtomic(P.info, JSON.stringify({
   version: VERSION,
   node,
   herdr_app: hrd,
-  codex: process.env.HERDR_USAGE_CODEX || which("codex"),
+  codex: findCodex(),
   codex_home: process.env.CODEX_HOME || prevInfo.codex_home || null,
   settings,
   layout: layoutPlan ? LAYOUT : prevInfo.layout ?? null,

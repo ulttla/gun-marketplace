@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { appHomeDir, usageHome, readJson } from "./util.mjs";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.2";
 export const MIN_NODE = 22;
 export const MODS = ["gun-usage-bar", "gun-usage-detail"];
 export const LAYOUT = "gun-usage";
@@ -20,7 +20,7 @@ export function paths() {
 }
 
 export function supportedPlatform() {
-  return process.platform === "darwin" || process.platform === "linux";
+  return ["darwin", "linux", "win32"].includes(process.platform);
 }
 
 const isExec = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile(); } catch { return false; } };
@@ -28,9 +28,24 @@ const isExec = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return fs.sta
 /** First executable named `name` on PATH, or null. */
 export function which(name) {
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
-    if (dir && isExec(path.join(dir, name))) return path.join(dir, name);
+    const names = process.platform === "win32" ? [/\.exe$/i.test(name) ? name : `${name}.exe`] : [name];
+    for (const n of names) if (dir && isExec(path.join(dir, n))) return path.join(dir, n);
   }
   return null;
+}
+
+/** Prefer the native Windows executable: .cmd/.ps1 launchers need a shell. */
+export function findCodex() {
+  if (process.env.HERDR_USAGE_CODEX) return process.env.HERDR_USAGE_CODEX;
+  const onPath = which("codex");
+  if (onPath || process.platform !== "win32") return onPath;
+  const npm = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@openai", "codex");
+  const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
+  return [
+    path.join(os.homedir(), ".local", "bin", "codex.exe"),
+    path.join(npm, "node_modules", "@openai", `codex-win32-${process.arch}`, "vendor", `${arch}-pc-windows-msvc`, "bin", "codex.exe"),
+    path.join(npm, "vendor", `${arch}-pc-windows-msvc`, "bin", "codex.exe"),
+  ].find(isExec) ?? null;
 }
 
 /** The Node.js to bake into the wrapper and mods: HERDR_USAGE_NODE, else a launcher
@@ -54,7 +69,7 @@ export function findHerdrApp() {
 
 /** Run herdr-app; returns {ok, out}. Never throws. */
 export function herdr(bin, args, timeout = 30_000) {
-  const r = spawnSync(bin, args, { encoding: "utf8", timeout });
+  const r = spawnSync(bin, args, { encoding: "utf8", timeout, windowsHide: true });
   const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trim();
   return { ok: r.status === 0 && !/^\s*\{\s*"error"/.test(r.stdout ?? ""), out: out || String(r.error?.message ?? "") };
 }
@@ -68,7 +83,7 @@ export function shownLayout(bin) {
 
 /** Major version of a node binary, or null. */
 export function nodeMajor(bin) {
-  const r = spawnSync(bin, ["-p", "process.versions.node"], { encoding: "utf8", timeout: 10_000 });
+  const r = spawnSync(bin, ["-p", "process.versions.node"], { encoding: "utf8", timeout: 10_000, windowsHide: true });
   const m = r.status === 0 && String(r.stdout).trim().match(/^(\d+)\./);
   return m ? Number(m[1]) : null;
 }

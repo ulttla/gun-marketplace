@@ -37,7 +37,7 @@ const versions = {
 };
 if (new Set(Object.values(versions)).size !== 1) errors.push(`herdr-usage versions differ: ${JSON.stringify(versions)}`);
 
-const skill = fs.readFileSync(path.join(plugin, "skills/herdr-usage/SKILL.md"), "utf8");
+const skill = fs.readFileSync(path.join(plugin, "skills/herdr-usage/SKILL.md"), "utf8").replaceAll("\r\n", "\n");
 const fm = skill.match(/^---\n([\s\S]*?)\n---\n/);
 if (!fm || !/^name: herdr-usage$/m.test(fm[1]) || !/^description: \S/m.test(fm[1])) errors.push("skills/herdr-usage/SKILL.md: frontmatter needs name: herdr-usage and a description");
 

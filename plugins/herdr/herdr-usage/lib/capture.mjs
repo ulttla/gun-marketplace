@@ -152,9 +152,12 @@ export function pruneWrapperTemps(dir = os.tmpdir(), maxAgeMs = 120_000) {
 }
 
 export function captureFromStdin(src) {
+  return capturePayload(src, readStdin());
+}
+
+export function capturePayload(src, text) {
   if (src !== "claude" && src !== "agy") return 2;
   pruneWrapperTemps();
-  const text = readStdin();
   if (!text.trim()) return 0;
   let payload;
   try { payload = JSON.parse(text); } catch { return 0; }

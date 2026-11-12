@@ -8,9 +8,17 @@ import crypto from "node:crypto";
 import { writeAtomic, readJson } from "./util.mjs";
 
 // Any usage home (HERDR_USAGE_HOME may move it): the wrapper is "<home>/bin/statusline-wrap".
-export const WRAP_RE = /\/bin\/statusline-wrap' (claude|agy)( [A-Za-z0-9+\/=]+)?$/;
+export const WRAP_RE = /[\\/]bin[\\/]statusline-wrap(?:\.mjs)?['"]? (claude|agy)( [A-Za-z0-9+\/=]+)?(?:; exit \$LASTEXITCODE)?$/;
 
-export const isWrapper = (sl) => Boolean(sl && typeof sl.command === "string" && WRAP_RE.test(sl.command));
+// agy runs cmd.exe through Go's Windows argument quoting. Literal quotes in
+// the command become escaped quotes, so keep its outer command quote-free.
+const PS_RE = /^powershell\.exe -NoProfile -NonInteractive -EncodedCommand ([A-Za-z0-9+/=]+)$/;
+function wrapperText(sl) {
+  if (typeof sl?.command !== "string") return "";
+  const m = sl.command.match(PS_RE);
+  return m ? Buffer.from(m[1], "base64").toString("utf16le") : sl.command;
+}
+export const isWrapper = (sl) => WRAP_RE.test(wrapperText(sl));
 
 function detectIndent(text) {
   const m = text.match(/\n([ \t]+)"/);
@@ -46,6 +54,15 @@ export function editJson(file, fn, { create = false } = {}) {
 
 export function wrapperCommand(wrapPath, src, origCommand) {
   const enc = origCommand ? Buffer.from(origCommand, "utf8").toString("base64") : "";
+  if (process.platform === "win32") {
+    const node = (process.env.HERDR_USAGE_NODE || process.execPath).replaceAll("\\", "/");
+    if (src === "agy") {
+      const quote = (s) => `'${s.replaceAll("'", "''")}'`;
+      const script = `& ${quote(node)} ${quote(wrapPath.replaceAll("\\", "/"))} ${src}${enc ? ` ${enc}` : ""}; exit $LASTEXITCODE`;
+      return `powershell.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`;
+    }
+    return `"${node}" "${wrapPath.replaceAll("\\", "/")}" ${src}${enc ? ` ${enc}` : ""}`;
+  }
   return `/bin/sh '${wrapPath.replace(/'/g, "'\\''")}' ${src}${enc ? ` ${enc}` : ""}`;
 }
 
@@ -66,7 +83,18 @@ export function installStatusLine({ file, src, wrapPath, origFile, create = fals
   const created = create && !fs.existsSync(file);
   return editJson(file, (obj) => {
     const cur = obj.statusLine;
-    if (isWrapper(cur)) return { changed: false, note: "already wrapped" };
+    if (isWrapper(cur)) {
+      // Repair older Windows agy commands on update without replacing the
+      // saved original with our own wrapper (including the short-path fix).
+      if (process.platform === "win32" && src === "agy") {
+        const command = wrapperCommand(wrapPath, src, originalFromWrapper(cur));
+        if (cur.command !== command) {
+          obj.statusLine = { ...cur, command };
+          return { changed: true, note: "updated Windows agy launcher" };
+        }
+      }
+      return { changed: false, note: "already wrapped" };
+    }
     writeAtomic(origFile, JSON.stringify({ present: Object.prototype.hasOwnProperty.call(obj, "statusLine"), value: cur ?? null, ...(created ? { created: true } : {}) }) + "\n");
     const runnable = cur && cur.type === "command" && typeof cur.command === "string" && cur.command.trim() && cur.enabled !== false;
     const next = { ...(cur && typeof cur === "object" ? cur : {}), type: "command", command: wrapperCommand(wrapPath, src, runnable ? cur.command : "") };
@@ -78,7 +106,7 @@ export function installStatusLine({ file, src, wrapPath, origFile, create = fals
 
 /** The original command carried in the wrapper's argv (base64), or null. */
 export function originalFromWrapper(sl) {
-  const m = isWrapper(sl) && sl.command.match(/statusline-wrap' [a-z]+ ([A-Za-z0-9+/=]+)$/);
+  const m = isWrapper(sl) && wrapperText(sl).match(/statusline-wrap(?:\.mjs)?['"]? [a-z]+ ([A-Za-z0-9+/=]+)(?:; exit \$LASTEXITCODE)?$/);
   return m ? Buffer.from(m[1], "base64").toString("utf8") : null;
 }
 
