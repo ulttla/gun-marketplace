@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import { writeAtomic, readJson } from "./util.mjs";
 
 // Any usage home (HERDR_USAGE_HOME may move it): the wrapper is "<home>/bin/statusline-wrap".
-export const WRAP_RE = /\/bin\/statusline-wrap' (claude|agy)( [A-Za-z0-9+\/=]+)?$/;
+export const WRAP_RE = /[\\/]bin[\\/]statusline-wrap(?:\.mjs)?['"] (claude|agy)( [A-Za-z0-9+\/=]+)?$/;
 
 export const isWrapper = (sl) => Boolean(sl && typeof sl.command === "string" && WRAP_RE.test(sl.command));
 
@@ -46,6 +46,10 @@ export function editJson(file, fn, { create = false } = {}) {
 
 export function wrapperCommand(wrapPath, src, origCommand) {
   const enc = origCommand ? Buffer.from(origCommand, "utf8").toString("base64") : "";
+  if (process.platform === "win32") {
+    const node = (process.env.HERDR_USAGE_NODE || process.execPath).replaceAll("\\", "/");
+    return `"${node}" "${wrapPath.replaceAll("\\", "/")}" ${src}${enc ? ` ${enc}` : ""}`;
+  }
   return `/bin/sh '${wrapPath.replace(/'/g, "'\\''")}' ${src}${enc ? ` ${enc}` : ""}`;
 }
 
@@ -78,7 +82,7 @@ export function installStatusLine({ file, src, wrapPath, origFile, create = fals
 
 /** The original command carried in the wrapper's argv (base64), or null. */
 export function originalFromWrapper(sl) {
-  const m = isWrapper(sl) && sl.command.match(/statusline-wrap' [a-z]+ ([A-Za-z0-9+/=]+)$/);
+  const m = isWrapper(sl) && sl.command.match(/statusline-wrap(?:\.mjs)?['"] [a-z]+ ([A-Za-z0-9+/=]+)$/);
   return m ? Buffer.from(m[1], "base64").toString("utf8") : null;
 }
 

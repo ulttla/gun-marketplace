@@ -20,7 +20,7 @@ export function paths() {
 }
 
 export function supportedPlatform() {
-  return process.platform === "darwin" || process.platform === "linux";
+  return ["darwin", "linux", "win32"].includes(process.platform);
 }
 
 const isExec = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile(); } catch { return false; } };
@@ -28,7 +28,8 @@ const isExec = (p) => { try { fs.accessSync(p, fs.constants.X_OK); return fs.sta
 /** First executable named `name` on PATH, or null. */
 export function which(name) {
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
-    if (dir && isExec(path.join(dir, name))) return path.join(dir, name);
+    const names = process.platform === "win32" ? [name, `${name}.exe`] : [name];
+    for (const n of names) if (dir && isExec(path.join(dir, n))) return path.join(dir, n);
   }
   return null;
 }

@@ -73,7 +73,7 @@ export function groupFromRolloutLine(line) {
 /** One bounded app-server exchange. The child runs in its own process group and is always killed. */
 export function readAppServer(timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
-    const child = spawn(codexBin(), ["app-server"], { stdio: ["pipe", "pipe", "ignore"], detached: true });
+    const child = spawn(codexBin(), ["app-server"], { stdio: ["pipe", "pipe", "ignore"], detached: process.platform !== "win32", windowsHide: true });
     let buf = "";
     let done = false;
     const finish = (err, val) => {
@@ -81,8 +81,15 @@ export function readAppServer(timeoutMs = 15000) {
       done = true;
       clearTimeout(timer);
       try { child.stdin.end(); } catch {}
-      try { process.kill(-child.pid, "SIGTERM"); } catch {}
-      setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, 1500).unref();
+      if (process.platform === "win32") {
+        if (child.pid) {
+          const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+          killer.on("error", () => { try { child.kill(); } catch {} });
+        }
+      } else {
+        try { process.kill(-child.pid, "SIGTERM"); } catch {}
+        setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, 1500).unref();
+      }
       err ? reject(err) : resolve(val);
     };
     const timer = setTimeout(() => finish(new Error("timeout")), timeoutMs);
