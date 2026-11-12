@@ -1,18 +1,40 @@
 #!/usr/bin/env python3
 """codex-context-handoff launcher shim.
 
-Installed ahead of the real `codex` on PATH. Inside a Herdr terminal it starts
-interactive Codex (bare, `resume`, `fork`) with `--no-daemon` and
-CODEX_CONTEXT_HANDOFF=1 so the handoff hooks run in the foreground process.
-Everything else, and CODEX_CONTEXT_HANDOFF=0, passes through unchanged.
+Installed ahead of the real `codex` on PATH. Inside a Herdr terminal (valid
+HC_TERMINAL_ID) it starts interactive Codex (bare, `resume`, `fork`) with
+explicit `--dangerously-bypass-approvals-and-sandbox` and `--no-daemon`, and
+sets CODEX_CONTEXT_HANDOFF=1 so the handoff hooks run in the foreground process.
+
+- CODEX_CONTEXT_HANDOFF=0 turns off the handoff only; full access and
+  --no-daemon still apply.
+- An explicit narrower permission choice on the command line wins and the
+  bypass flag is not added: -s/--sandbox, -a/--ask-for-approval,
+  --approve-for-me, -p/--profile, or -c sandbox_mode/approval_policy/
+  approvals_reviewer/profile/default_permissions/permissions[.*]. A bypass
+  flag already present (or its alias --yolo) is not repeated (a duplicate at
+  the same level is a codex parse error).
+- Help, version, --remote, non-interactive subcommands and anything outside
+  Herdr pass through unchanged.
+- CODEX_HERDR_FULL_ACCESS=force (set by ~/.local/bin/codex-herdr) applies the
+  same rules outside Herdr; it is removed before codex starts.
+- `codex context-handoff request-transfer` is the handoff plugin's own helper,
+  run by the model from inside an opted-in chat: it finds that chat's plugin
+  data (from CODEX_THREAD_ID or CODEX_SESSION_ID) and runs the installed hook
+  script with --request-transfer. It never starts codex.
 """
 
 import os
 import re
+import subprocess
 import sys
+from pathlib import Path
 
 MARKER = b"codex-context-handoff launcher shim"
 TERMINAL = re.compile(r"t[0-9a-z]+\Z")
+SESSION = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+HELPER = ["context-handoff", "request-transfer"]
+BYPASS = "--dangerously-bypass-approvals-and-sandbox"
 VALUE_OPTIONS = {
     "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env",
     "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox",
@@ -27,6 +49,11 @@ SUBCOMMANDS = {
 }
 INTERACTIVE = {"resume", "fork"}
 PASSTHROUGH_FLAGS = {"-h", "--help", "-V", "--version", "--remote"}
+# Explicit permission choices that replace the full-access default.
+PERMISSION_OPTIONS = {BYPASS, "--yolo", "-s", "--sandbox", "-a", "--ask-for-approval", "--approve-for-me",
+                      "-p", "--profile"}
+PERMISSION_CONFIG_KEYS = {"sandbox_mode", "approval_policy", "approvals_reviewer", "profile",
+                          "default_permissions", "permissions"}
 
 
 def is_shim(path, own):
@@ -59,8 +86,29 @@ def options(args):
         position += 1
 
 
+def explicit_permission(args):
+    """True when the command line already chooses sandbox/approval/profile itself."""
+    for position, token in options(args):
+        name = token.split("=", 1)[0]
+        if name in PERMISSION_OPTIONS:
+            return True
+        if not token.startswith("--") and token[:2] in {"-s", "-a", "-p"}:
+            return True  # attached short value, e.g. -sread-only
+        if name in {"-c", "--config"} or (not token.startswith("--") and token[:2] == "-c"):
+            if "=" in token and name == "--config":
+                value = token.split("=", 1)[1]
+            elif name in {"-c", "--config"}:
+                value = args[position + 1] if position + 1 < len(args) else ""
+            else:
+                value = token[2:]
+            key = value.split("=", 1)[0].strip()
+            if key in PERMISSION_CONFIG_KEYS or key.split(".", 1)[0] in PERMISSION_CONFIG_KEYS:
+                return True
+    return False
+
+
 def launch_plan(args):
-    """Return the index where --no-daemon goes, -1 if already present, or None to pass through."""
+    """Return (insert index, start of the option scope for --no-daemon), or None to pass through."""
     if any(token.split("=", 1)[0] in PASSTHROUGH_FLAGS for _, token in options(args)):
         return None  # help, version and remote modes, wherever they appear
     position = 0
@@ -79,16 +127,62 @@ def launch_plan(args):
         elif not token.startswith("-"):
             if token in INTERACTIVE:
                 # resume/fork have their own --no-daemon (a top-level one may not reach them).
-                rest = args[position + 1:]
-                return -1 if any(t == "--no-daemon" for _, t in options(rest)) else position + 1
+                return position + 1, position + 1
             if token in SUBCOMMANDS:
                 return None
             break  # the interactive prompt
         position += 1
-    return -1 if any(t == "--no-daemon" for _, t in options(args)) else 0
+    return 0, 0
+
+
+def request_transfer():
+    """Run the installed handoff hook's transfer helper for the chat this shell belongs to."""
+    session = os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID") or ""
+    if not SESSION.fullmatch(session):
+        print("codex context-handoff: no CODEX_THREAD_ID; run this from a tool call inside the Codex chat",
+              file=sys.stderr)
+        return 2
+    home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    data = home / "plugins" / "data"
+    # Only a hook version with the helper records `<data>/<chat>/.hook-script` (its script and the chat's
+    # Codex pid). Data directories may be symlinks to one another; the resolved directory is the identity.
+    roots = sorted({folder.resolve() for folder in data.glob("*") if (folder / session / ".hook-script").is_file()})
+    if len(roots) != 1:
+        print(f"codex context-handoff: expected one plugin data directory with this chat's hook record for chat "
+              f"{session}, found {len(roots)}. A chat running older hooks needs Codex restarted through the launcher "
+              "or a new chat (a prompt does not upgrade it); continue in a new chat.",
+              file=sys.stderr)
+        return 2
+    try:
+        script, pid = (roots[0] / session / ".hook-script").read_text(encoding="utf-8").split("\n")[:2]
+        pid = int(pid)
+    except (OSError, ValueError):
+        script, pid = "", 0
+    if not script.endswith("/hooks/context_handoff.py") or not os.path.isfile(script) or pid not in ancestors():
+        print("codex context-handoff: this chat's hooks were not recorded by its running Codex process. Restart "
+              "Codex through the launcher or continue in a new chat if it runs older hooks (a prompt does not upgrade "
+              "it); otherwise submit any prompt in the chat first", file=sys.stderr)
+        return 2
+    os.execv(sys.executable, [sys.executable, script, "--request-transfer", str(roots[0])])
+
+
+def ancestors():
+    """Process ids above this one."""
+    found, current = set(), os.getppid()
+    while current > 1 and current not in found:
+        found.add(current)
+        try:
+            row = subprocess.run(["ps", "-o", "ppid=", "-p", str(current)], capture_output=True, text=True,
+                                 timeout=2).stdout.strip()
+            current = int(row)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            break
+    return found
 
 
 def main():
+    if sys.argv[1:] == HELPER:
+        return request_transfer()
     own = os.path.realpath(__file__)
     real = real_codex(own)
     if not real:
@@ -96,13 +190,20 @@ def main():
         return 127
     args = sys.argv[1:]
     env = dict(os.environ)
+    forced = env.pop("CODEX_HERDR_FULL_ACCESS", "") == "force"
     plan = None
-    if env.get("CODEX_CONTEXT_HANDOFF") != "0" and TERMINAL.fullmatch(env.get("HC_TERMINAL_ID", "")):
+    if forced or TERMINAL.fullmatch(env.get("HC_TERMINAL_ID", "")):
         plan = launch_plan(args)
     if plan is not None:
-        env["CODEX_CONTEXT_HANDOFF"] = "1"
-        if plan >= 0:
-            args = args[:plan] + ["--no-daemon"] + args[plan:]
+        at, scope = plan
+        if env.get("CODEX_CONTEXT_HANDOFF") != "0":
+            env["CODEX_CONTEXT_HANDOFF"] = "1"
+        extra = []
+        if not explicit_permission(args):
+            extra.append(BYPASS)
+        if not any(t == "--no-daemon" for _, t in options(args[scope:])):
+            extra.append("--no-daemon")
+        args = args[:at] + extra + args[at:]
     os.execve(real, [real, *args], env)
 
 
