@@ -6,9 +6,19 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { installStatusLine, uninstallStatusLine, isWrapper, originalFromWrapper } from "../lib/settings.mjs";
+import { findHerdrApp, findCodex, which } from "../lib/setup.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-test("Windows: install, wrapper pass-through, update, restore in isolated home", { skip: process.platform !== "win32" }, () => {
+// Avoid Node 25's native cpSync crash on some Unicode Windows paths.
+function copyTree(from, to) {
+  fs.mkdirSync(to, { recursive: true });
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const source = path.join(from, entry.name), dest = path.join(to, entry.name);
+    if (entry.isDirectory()) copyTree(source, dest);
+    else fs.writeFileSync(dest, fs.readFileSync(source));
+  }
+}
+test("Windows: install, wrapper pass-through, update, restore in isolated home", { skip: process.platform !== "win32" || !findHerdrApp() }, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "usage Windows '한글-"));
   const app = path.join(home, "herdr");
   const usage = path.join(app, "usage");
@@ -47,4 +57,40 @@ test("Windows: install, wrapper pass-through, update, restore in isolated home",
     assert.equal(fs.readFileSync(claude, "utf8"), original);
     assert.deepEqual(JSON.parse(fs.readFileSync(agy)), {});
   } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("Windows: native wrapper preserves bytes, status and saved command without Herdr", { skip: process.platform !== "win32" }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "usage Windows '한글-"));
+  try {
+    copyTree(path.join(repo, "bin"), path.join(home, "bin"));
+    copyTree(path.join(repo, "lib"), path.join(home, "lib"));
+    fs.writeFileSync(path.join(home, "package.json"), '{"type":"module"}');
+    const file = path.join(home, "settings.json"), origFile = path.join(home, "state", "original.json");
+    const script = path.join(home, "original.mjs");
+    fs.writeFileSync(script, 'import fs from "node:fs"; process.stdout.write(fs.readFileSync(0)); process.stderr.write("stderr"); process.exitCode=9;');
+    const command = `"${process.execPath}" "${script}"`;
+    const before = JSON.stringify({ statusLine: { type: "command", command } }, null, 2) + "\n";
+    fs.writeFileSync(file, before);
+    const params = { file, src: "claude", wrapPath: path.join(home, "bin", "statusline-wrap.mjs"), origFile };
+    assert.ok(installStatusLine(params).changed);
+    assert.equal(installStatusLine(params).changed, false);
+    const sl = JSON.parse(fs.readFileSync(file)).statusLine;
+    assert.ok(isWrapper(sl));
+    assert.equal(originalFromWrapper(sl), command);
+    const input = fs.readFileSync(path.join(repo, "test/fixtures/claude-statusline.json"));
+    const env = { ...process.env, HERDR_USAGE_HOME: home };
+    const result = spawnSync(sl.command, { shell: true, input, env, windowsHide: true });
+    assert.equal(result.status, 9);
+    assert.deepEqual(result.stdout, input);
+    assert.equal(result.stderr.toString(), "stderr");
+    assert.ok(fs.readdirSync(path.join(home, "cache", "captures")).length > 0);
+    assert.ok(uninstallStatusLine({ file, origFile }).changed);
+    assert.equal(fs.readFileSync(file, "utf8"), before);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+test("Windows: discovers a native executable using PATHEXT-style exe suffix", { skip: process.platform !== "win32" }, () => {
+  assert.equal(which("node"), process.execPath);
+  const found = findCodex();
+  if (found) assert.match(found, /\.exe$/i);
 });
