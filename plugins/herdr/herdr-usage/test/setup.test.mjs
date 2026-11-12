@@ -194,7 +194,7 @@ test("setup: failed checks change nothing and exit nonzero", () => {
     ["no Herdr home", (s) => fs.rmSync(s.app, { recursive: true }), [], /Herdr home not found/],
     ["old node for the wrapper", (s) => { s.env.HERDR_USAGE_NODE = path.join(s.home, "missing-node"); }, [], /older than|missing/],
     ["unknown option", () => {}, ["--frobnicate"], /unknown option/],
-    ["unsupported platform", (s) => { const f = path.join(s.stubDir, "win32.mjs"); fs.writeFileSync(f, 'Object.defineProperty(process, "platform", { value: "win32" });\n'); s.env.NODE_OPTIONS = `--import=${f}`; }, [], /unsupported platform win32/],
+    ["unsupported platform", (s) => { const f = path.join(s.stubDir, "freebsd.mjs"); fs.writeFileSync(f, 'Object.defineProperty(process, "platform", { value: "freebsd" });\n'); s.env.NODE_OPTIONS = `--import=${f}`; }, [], /unsupported platform freebsd/],
   ];
   for (const [name, setup, args, re] of cases) {
     const s = sandbox();
