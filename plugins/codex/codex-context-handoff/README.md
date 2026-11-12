@@ -4,7 +4,7 @@ When an opted-in Codex CLI chat crosses 40% of its effective context window, the
 
 ## Install and enable
 
-Requires Codex CLI, Herdr CLI (`hc`), and Python 3. The terminal automation uses the English Codex CLI prompt and Herdr's turn counter and status time (`hc get` fields `turn` and `status_ms`, present in Herdr 0.1.20). Tested on macOS with Codex CLI 0.167.1 and Herdr 0.1.19.
+Requires Codex CLI, Herdr CLI (`hc`), and Python 3. The terminal automation uses the English Codex CLI prompt and Herdr's turn counter and status time (`hc get` fields `turn` and `status_ms`, present in Herdr 0.1.20). Tested on macOS with Codex CLI 0.167.2 and Herdr 0.1.20.
 
 ```bash
 codex plugin marketplace add ulttla/gun-marketplace
@@ -46,6 +46,8 @@ Submit one of these as the whole prompt. The hook blocks it, so it never reaches
 
 The setting belongs to the chat's session ID; there is no global switch. Case and extra spaces are ignored, but quotes or any other words make it an ordinary prompt. These commands also work when the process was not started through the launcher, so `handoff status` can say that a restart is needed.
 
+`handoff goal transfer on` (`핸드오프 목표 이전 켜기`) and `handoff goal transfer off` (`핸드오프 목표 이전 끄기`) turn Goal transfer on or off for the whole plugin; see below. `handoff status` also shows `Goal transfer: on since <time>` or `off`.
+
 A prompt of exactly `end session`, `wrap up`, `세션 종료`, or `마무리` goes to the model as usual and skips the handoff for that turn only.
 
 ## How it works
@@ -58,7 +60,24 @@ A prompt of exactly `end session`, `wrap up`, `세션 종료`, or `마무리` go
 
 The hooks act only in an interactive root chat whose hook process descends from the foreground Codex process of the Herdr terminal, in the same worktree. The session source can be `cli`, or `vscode` for a chat first started through the daemon and later resumed with `--no-daemon`. The process check excludes IDE, daemon, `exec`, and subagent hooks.
 
-The handoff includes the task, decisions, worktree, validation, next action, and live child terminal IDs. The plugin stores its handoff notes and switch logs locally in `$PLUGIN_DATA/<old-session-id>/`. The notes can contain project context. Review them before sharing. If a Codex update changes its transcript or prompt, the plugin can fall back to manual recovery.
+The handoff includes the task, decisions, worktree, validation, next action, and live child terminal IDs. The plugin stores its handoff notes and switch logs locally in `$PLUGIN_DATA/<old-session-id>/` (a `.goal.json` beside a note records a transferred Goal). If `$PLUGIN_DATA` is a symlink, the plugin uses the resolved directory, so two installs that share one data directory refer to the same note paths. The notes can contain project context. Review them before sharing. If a Codex update changes its transcript or prompt, the plugin can fall back to manual recovery.
+
+## Goals
+
+A Codex Goal starts its next turn as soon as a turn ends, so a chat with an active Goal never reaches the idle prompt the switch needs. The plugin reads the Goal state from `<CODEX_HOME>/goals_1.sqlite` read-only (found from the transcript path) and never writes it or calls any Goal API. A Goal state it cannot read stops the handoff for that chat with one message; it is never treated as "no Goal".
+
+- **No Goal:** unchanged.
+- **Goal not active** (paused, blocked, usage- or budget-limited, complete): the usual handoff, asking the model to leave the Goal alone. If the Goal changes during the handoff turn, nothing is handed off.
+- **Active Goal, transfer off:** no handoff request. The chat shows once that it is waiting and Codex auto-compaction handles context. If transfer is turned on later, the chat's next Goal turn past the threshold gets the transfer request.
+- **Active Goal, transfer on:** the request also asks the model to call `get_goal`, then `update_goal` with `paused`, and print both results. The plugin checks the transcript after its own request (no prompt, steer or `/goal` change from you after it; exactly one `update_goal` and no `create_goal`; an active then a paused result for the same Goal from `update_goal`) and that the DB shows the same paused Goal (same Goal ID, budget, token count and time). It then saves the objective, the remaining token budget (if any) and the counters with the note, and switches. The fresh chat is asked to call `create_goal` with exactly that objective and `token_budget`; its next Stop checks the DB once, reminds at most once, and reports a mismatch without fixing it. Counters restart in the fresh chat; the note and the plugin data keep the per-chat and total counters.
+
+Transfer needs two things: the plugin consent from `handoff goal transfer on` (stored in `$PLUGIN_DATA/goal-transfer.json`), and a standing instruction from you, for example in `~/.codex/AGENTS.md`, that the model may pause and recreate a Goal when this plugin's request contains a "GOAL TRANSFER" section. `handoff on` alone is not consent. `CODEX_CONTEXT_HANDOFF_GOAL=off` disables transfer whatever the file says, and `handoff off` disables everything for its chat.
+
+Turning transfer off (or the environment kill switch) at any point before the fresh chat accepts the continuation stops the handoff: the capture, the grace window, the startup wait, the final check before the continuation and the fresh chat itself all check it again. In the fresh chat, a Goal with the exact objective and budget counts as recreated whatever its native status (it may already be complete). Any prompt submitted there before the Goal is recreated, including a Herdr message or a `handoff` command, ends the check: the plugin does not remind the model later, and says that the old Goal stays paused.
+
+Each chat gets at most one transfer request. If the model does not pause, or the pause cannot be verified, nothing is switched: an active Goal keeps running in the same chat, and a paused one stays paused with a message to resume it with `/goal`. A handoff cancelled after the pause also leaves the old Goal paused; the plugin never resumes a Goal. `handoff status` lists a Goal paused for a handoff that did not reach a fresh chat.
+
+Live checks cover a 20-second MCP startup, draft and submitted-prompt takeover, a 0.2.0-to-0.3.0 handoff through shared plugin data, and an active Goal's pause, exact remaining-budget recreation and native continuation to completion. Goal checks used a test-only 1% threshold; the shipped default remains 40%. Concurrent Stop-hook provenance and long transcripts also have automated regression coverage.
 
 ## Recover a handoff
 

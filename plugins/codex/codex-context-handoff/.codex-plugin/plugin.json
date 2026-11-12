@@ -1,7 +1,7 @@
 {
   "name": "codex-context-handoff",
-  "version": "0.2.1",
-  "description": "Continue long Codex CLI tasks in a fresh chat in the same Herdr terminal, with a launcher and per-chat handoff off/on/status.",
+  "version": "0.3.0",
+  "description": "Continue long Codex CLI tasks in a fresh chat in the same Herdr terminal, with a launcher, per-chat handoff off/on/status, and opt-in transfer of an active Goal.",
   "author": {
     "name": "ulttla",
     "url": "https://github.com/ulttla"
