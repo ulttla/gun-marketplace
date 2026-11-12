@@ -158,6 +158,20 @@ class ContextHandoffTests(unittest.TestCase):
             "id": "second", "usage": None, "complete": False,
         })
 
+    def test_long_turn_starting_before_the_tail_window_is_still_found(self):
+        # Parent session 01a1ce32: a 1-hour turn grew past the 4 MB tail, so Stop saw no turn and never armed.
+        filler = event("item_completed", item={"text": "x" * 1000})
+        self.write_events(self.meta, event("task_started", turn_id="long"), *([filler] * 60),
+                          event("token_count", info=usage(41)))
+        with patch.object(handoff, "TRANSCRIPT_TAIL", 10_000):
+            latest = handoff.recent_turn(self.transcript)
+            self.assertEqual((latest["id"], latest["usage"]["last_token_usage"]["total_tokens"]), ("long", 41))
+            with self.eligible():
+                self.assertEqual(handoff.stop_hook(self.payload(turn_id="long"), self.root, "t1")["decision"], "block")
+        self.write_events(self.meta, *([filler] * 60))
+        with patch.object(handoff, "TRANSCRIPT_TAIL", 10_000):
+            self.assertIsNone(handoff.recent_turn(self.transcript))  # whole file read, no turn
+
     def test_stop_requests_one_continuation_per_turn(self):
         self.write_events(
             {"type": "session_meta", "payload": {

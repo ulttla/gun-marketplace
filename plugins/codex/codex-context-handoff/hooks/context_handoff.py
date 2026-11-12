@@ -36,9 +36,9 @@ RESTART = (
 HC_ENV = {key: value for key, value in os.environ.items() if key != "HC_TERMINAL_ID"}
 
 
-def transcript_rows(path):
+def transcript_rows(path, tail=TRANSCRIPT_TAIL):
     with Path(path).open("rb") as stream:
-        offset = max(stream.seek(0, os.SEEK_END) - TRANSCRIPT_TAIL, 0)
+        offset = max(stream.seek(0, os.SEEK_END) - tail, 0)
         stream.seek(offset)
         if offset:
             stream.readline()
@@ -54,21 +54,28 @@ def transcript_rows(path):
 
 
 def recent_turn(path):
-    """Read the latest turn only, ignoring usage preceding a compaction."""
-    turn = None
-    for row_type, event in transcript_rows(path):
-        kind = event.get("type")
-        if row_type == "compacted" and turn:
-            turn["usage"] = None
-        if row_type != "event_msg":
-            continue
-        if kind == "task_started":
-            turn = {"id": event.get("turn_id"), "usage": None, "complete": False}
-        elif turn and kind == "token_count":
-            turn["usage"] = event.get("info")
-        elif turn and kind == "task_complete" and event.get("turn_id") == turn["id"]:
-            turn["complete"] = True
-    return turn
+    """Read the latest turn only, ignoring usage preceding a compaction.
+
+    A long turn can start before the usual tail window; widen it until the turn's start shows.
+    """
+    tail = TRANSCRIPT_TAIL
+    while True:
+        turn = None
+        for row_type, event in transcript_rows(path, tail):
+            kind = event.get("type")
+            if row_type == "compacted" and turn:
+                turn["usage"] = None
+            if row_type != "event_msg":
+                continue
+            if kind == "task_started":
+                turn = {"id": event.get("turn_id"), "usage": None, "complete": False}
+            elif turn and kind == "token_count":
+                turn["usage"] = event.get("info")
+            elif turn and kind == "task_complete" and event.get("turn_id") == turn["id"]:
+                turn["complete"] = True
+        if turn or tail >= os.path.getsize(path):
+            return turn
+        tail *= 4
 
 
 def last_usage(path):
