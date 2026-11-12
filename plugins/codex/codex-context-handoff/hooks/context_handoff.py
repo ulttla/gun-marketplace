@@ -14,10 +14,15 @@ from pathlib import Path
 
 ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 TERMINAL = re.compile(r"t[0-9a-z]+\Z")
-RESUME = re.compile(r"\ACodex Context Handoff: ([\w-]+) ([\w-]+) ([0-9a-f]{24}) ")
+# Found anywhere in a prompt, so a continuation mixed with other text is caught too.
+RESUME = re.compile(r"Codex Context Handoff: ([\w-]+) ([\w-]+) ([0-9a-f]{24})(?![0-9a-f])")
 COMPOSER = re.compile(r"^›(?:\s+Ask Codex to do anything)?\s*$")
+PLACEHOLDER = "› Ask Codex to do anything"
 TRANSCRIPT_TAIL = 4 * 1024 * 1024
 MAX_NOTE = 12_000
+POLL = 0.2
+CLEAR_ECHO = 3.0  # seconds after /clear in which the old status and screen may still show
+SETTLE = 2.0  # seconds the fresh chat must stay idle with an empty prompt before the continuation
 CONTROLS = {
     "handoff off": "off", "handoff cancel": "off", "handoff on": "on", "handoff status": "status",
     "핸드오프 끄기": "off", "핸드오프 취소": "off", "핸드오프 켜기": "on", "핸드오프 상태": "status",
@@ -117,6 +122,11 @@ def threshold():
 def grace():
     value = env_number("CODEX_CONTEXT_HANDOFF_GRACE", "10", 0, 60, inclusive=True)
     return 10.0 if value is None else value
+
+
+def startup_wait():
+    value = env_number("CODEX_CONTEXT_HANDOFF_STARTUP_WAIT", "150", 12, 600, inclusive=True)
+    return 150.0 if value is None else value
 
 
 def exceeds_threshold(usage, threshold):
@@ -287,12 +297,14 @@ def capture(payload, state):
         return {}
     if not new_private_file(state.with_suffix(".md"), body.strip() + "\n"):
         return {}
+    if not guard_busy(state, record):
+        arm_guard(state, record)  # the switch arms it again once it holds the terminal lock
     with os.fdopen(
         os.open(state.with_suffix(".log"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w"
-    ) as log:
+    ) as output:
         subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve()), "--switch", str(state)],
-            stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
+            stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True,
         )
     return {"systemMessage": (
         f"Context handoff ready: a fresh chat starts in about {grace():g}s. Type anything or "
@@ -376,15 +388,35 @@ def mark_closing(payload, root):
         new_private_file(skip, "")
 
 
-def read_composer(terminal):
+def read_screen(terminal):
     result = hc("read", "--json", "--lines", "0", terminal)
-    screen = result.get("text", "")
+    return result.get("text", "") if result.get("complete") else None
+
+
+def footer_prompt(screen):
+    """(prompt line, line beneath it) from the footer, or None when the footer has no prompt."""
     lines = screen.rstrip().splitlines()
     # The prompt must be in the footer, beneath any transcript or dialogs.
-    prompt = next((line for line in reversed(lines[-4:]) if line.startswith("›")), "")
-    if not result.get("complete") or not COMPOSER.fullmatch(prompt):
+    for index in range(len(lines) - 1, max(len(lines) - 5, -1), -1):
+        if lines[index].startswith("›"):
+            return lines[index], lines[index + 1] if index + 1 < len(lines) else ""
+    return None
+
+
+def composer_text(screen):
+    """The composer's text: "" when empty, None when the footer has no prompt."""
+    found = footer_prompt(screen)
+    if found is None:
         return None
-    return screen
+    prompt, below = found
+    if below.strip():  # a multi-line draft (or one starting with a newline) continues beneath
+        return f"{prompt[1:].strip()}\n{below.strip()}".strip()
+    return "" if COMPOSER.fullmatch(prompt) else prompt[1:].strip()
+
+
+def read_composer(terminal):
+    screen = read_screen(terminal)
+    return screen if screen is not None and composer_text(screen) == "" else None
 
 
 def active_status(info):
@@ -392,7 +424,101 @@ def active_status(info):
     return status.get("state") if status.get("app") == "codex" else None
 
 
-def await_old_chat(record):
+def log(message):
+    print(f"{time.strftime('%H:%M:%S')} {message}", flush=True)
+
+
+def replace_private(path, content):
+    temporary = path.with_name(f".{path.name}.{os.getpid()}")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write(content)
+    os.replace(temporary, path)
+
+
+def guard_path(state, record):
+    return state.parent.parent / f"{record['terminal']}.switch"
+
+
+def arm_guard(state, record):
+    """Point the terminal at this handoff: any other prompt submitted there now stops it."""
+    replace_private(guard_path(state, record), f"{record['session']} {record['turn']} {record['nonce']}\n")
+
+
+def guard_armed(state, record):
+    try:
+        return guard_path(state, record).read_text(encoding="utf-8").split() == [
+            record["session"], record["turn"], record["nonce"],
+        ]
+    except OSError:
+        return False
+
+
+def guard_busy(state, record):
+    """Whether the terminal's guard points at another handoff that is still pending."""
+    try:
+        session, turn, _ = guard_path(state, record).read_text(encoding="utf-8").split()
+        other = store_for(state.parent.parent, session, turn)
+    except (OSError, ValueError):
+        return False
+    return other != state and other.is_file() and not any(other.with_suffix(s).exists() for s in DONE)
+
+
+def disarm_guard(state, record):
+    if guard_armed(state, record):
+        guard_path(state, record).unlink(missing_ok=True)
+
+
+def note_prompt_hook(payload, root, terminal):
+    """Record that UserPromptSubmit hooks run in this terminal's foreground Codex for this chat.
+
+    That hook is what stops a switch when a prompt is submitted, so only with this evidence does
+    the switch wait out a long startup after /clear. A resumed chat records its new process.
+    """
+    session = payload.get("session_id") or ""
+    if not ID.fullmatch(session):
+        return
+    evidence = root / session / ".prompt-hook"
+    try:
+        if in_foreground_tree(int(evidence.read_text(encoding="utf-8"))):
+            return
+    except (OSError, ValueError):
+        pass
+    info = terminal_info(terminal, payload.get("cwd"))
+    if info and in_foreground_tree(info["foreground"]["pid"]):
+        evidence.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        replace_private(evidence, f"{info['foreground']['pid']}\n")
+
+
+def prompt_hook_evidence(state, record):
+    try:
+        return (state.parent / ".prompt-hook").read_text(encoding="utf-8").strip() == str(record["pid"])
+    except OSError:
+        return False
+
+
+def stopped(state):
+    return (state.parent / ".off").exists() or state.with_suffix(".cancelled").exists()
+
+
+def continuation(record, state):
+    return (
+        f"Codex Context Handoff: {record['session']} {record['turn']} {record['nonce']} "
+        f"Read the local handoff note at {json.dumps(str(state.with_suffix('.md')))}. Check the working "
+        "tree and live Herdr workers before resuming the remaining work. Preserve the user's scope and "
+        "decisions."
+    )
+
+
+def herdr_turn(info):
+    turn = info.get("turn") if info else None
+    if type(turn) is not int:
+        raise RuntimeError("Could not read Herdr's turn counter for the original Codex terminal.")
+    return turn
+
+
+def await_old_chat(record, start_turn):
+    """Return (screen, Herdr turn) once the finished turn's chat shows an empty, idle prompt."""
     deadline = time.monotonic() + 12
     previous = None
     while time.monotonic() < deadline:
@@ -401,38 +527,138 @@ def await_old_chat(record):
         if not turn or turn["id"] != record["turn"] or not info:
             break
         status = active_status(info)
+        # Only the turn that wrote the note may end here: one step past the switch's start.
+        if not start_turn <= herdr_turn(info) <= start_turn + 1:
+            break
         if status in {"blocked", "error"} or (turn["complete"] and status == "working" and previous is not None):
             break
         if turn["complete"] and status in {"done", "idle"}:
-            screen = read_composer(record["terminal"])
-            if screen is not None and screen == previous:
-                return screen
-            previous = screen
+            current = (read_composer(record["terminal"]), info["turn"])
+            if current[0] is not None and current == previous:
+                return current
+            previous = current
         else:
             previous = None
-        time.sleep(0.2)
+        time.sleep(POLL)
     raise RuntimeError("The original chat did not reach an empty, idle Codex prompt.")
 
 
-def await_fresh_chat(record, old_screen):
-    deadline = time.monotonic() + 12
-    status = None
-    while time.monotonic() < deadline:
-        info = terminal_info(record["terminal"], record["cwd"], record["pid"])
-        if not info:
-            break
-        status = active_status(info)
-        if status in {"blocked", "error"}:
-            break
-        if status == "idle":
-            screen = read_composer(record["terminal"])
-            if (
-                screen and screen != old_screen
-                and sum(line.startswith("›") for line in screen.splitlines()) == 1
-            ):
-                return
-        time.sleep(0.2)
-    raise RuntimeError(f"Could not confirm a fresh, idle prompt after /clear (status: {status}).")
+def look(record):
+    """(status, Herdr turn, status time, screen) of the recorded Codex; None once it changed hands."""
+    info = terminal_info(record["terminal"], record["cwd"], record["pid"])
+    if not info:
+        return None
+    return active_status(info), info.get("turn"), info.get("status_ms"), read_screen(record["terminal"])
+
+
+def prompt_state(screen, old_screen):
+    if screen is None:
+        return "unreadable"
+    if not screen.strip():
+        return "blank"
+    found = footer_prompt(screen)
+    if found is None:
+        return "no prompt in the footer"
+    if composer_text(screen):
+        return "text in the composer"
+    if screen == old_screen:
+        return "old screen"
+    if sum(line.startswith("›") for line in screen.splitlines()) != 1:
+        return "old history"
+    # A fresh chat shows its placeholder; a bare prompt may hide a draft starting with a newline.
+    return "fresh" if found[0].rstrip() == PLACEHOLDER else "no placeholder"
+
+
+def describe(view, old_screen):
+    if view is None:
+        return "terminal changed hands"
+    return f"status {view[0]}, Herdr turn {view[1]}, prompt {prompt_state(view[3], old_screen)}"
+
+
+def source_moved(record, cache):
+    """Whether the old chat's transcript shows another turn (re-read only when the file changes)."""
+    stat = os.stat(record["transcript"])
+    signature = (stat.st_size, stat.st_mtime_ns)
+    if cache.get("signature") != signature:
+        latest = recent_turn(record["transcript"])
+        cache.update(signature=signature, moved=not latest or latest["id"] != record["turn"])
+    return cache["moved"]
+
+
+def fresh_chat_problem(view, state, record, old_screen, cleared_turn, echo, cache):
+    """Why the switch must stop now, or None while the fresh chat may still be starting.
+
+    Codex reports `working` while MCP servers start after /clear, with the fresh, empty prompt
+    on screen. That one busy period is allowed; a prompt, a draft, a dialog, a finished turn or
+    a second busy period is not. `echo` covers the moment before Codex redraws after /clear.
+    """
+    if stopped(state):
+        return "Handoff was cancelled (a prompt was submitted or the handoff was turned off)"
+    if not guard_armed(state, record):
+        return "The takeover guard for this terminal is missing"
+    if source_moved(record, cache):
+        return "The old chat started another turn"
+    if view is None:
+        return "The terminal no longer runs the original Codex in this worktree"
+    status, turn, since, screen = view
+    if type(turn) is not int or type(since) is not int:
+        return "Herdr did not report the turn counter and status time"
+    # Herdr's turn goes up each time the status leaves working: startup may end once.
+    if not cleared_turn <= turn <= cleared_turn + 1 or (status in {"working", "done"} and turn != cleared_turn):
+        return "The fresh chat ran something besides its startup"
+    if status in {"blocked", "error"}:
+        return f"The fresh chat reported {status}"
+    shown = prompt_state(screen, old_screen)
+    if echo:
+        # Until Codex redraws, only the old chat, the typed /clear itself, or the blank frame
+        # /clear draws before the fresh chat may show.
+        draft = composer_text(screen) if screen is not None else None
+        if shown in {"old screen", "blank"} or (draft and "/clear".startswith(draft)):
+            return None
+    elif status not in {"working", "idle"}:
+        return f"The fresh chat reported {status}"
+    elif shown == "fresh":
+        return None
+    if shown == "text in the composer":
+        return "Text appeared in the composer"
+    return f"No fresh, empty prompt after /clear ({shown})"
+
+
+def await_fresh_chat(record, state, old_screen, cleared_turn, cache):
+    """Return (turn, status time, screen) once the fresh chat has stayed idle at an empty prompt."""
+    start = time.monotonic()
+    evidence = prompt_hook_evidence(state, record)
+    # Without proof that the takeover hook runs in this process, a long busy startup is not trusted.
+    limit = startup_wait() if evidence else 12.0
+    log(f"waiting up to {limit:g}s for the fresh chat (prompt hook evidence: {'yes' if evidence else 'no'})")
+    settled = shown = None
+    echo = True  # until Codex has redrawn: closed after CLEAR_ECHO or at the first fresh prompt
+    while True:
+        now = time.monotonic()
+        elapsed = now - start
+        view = look(record)
+        summary = describe(view, old_screen)
+        if summary != shown:
+            log(f"+{elapsed:.1f}s after /clear: {summary}")
+            shown = summary
+        fresh = view is not None and prompt_state(view[3], old_screen) == "fresh"
+        echo = echo and elapsed < CLEAR_ECHO and not fresh
+        problem = fresh_chat_problem(view, state, record, old_screen, cleared_turn, echo, cache)
+        if problem:
+            raise RuntimeError(f"{problem} {elapsed:.1f}s after /clear ({summary}).")
+        if view[0] == "idle" and fresh:
+            if settled is None or settled[0] != view[1:]:
+                settled = (view[1:], now)
+            elif now - settled[1] >= SETTLE:
+                log(f"+{elapsed:.1f}s after /clear: fresh chat settled at an empty, idle prompt")
+                return view[1:]
+        else:
+            settled = None
+        if elapsed >= limit:
+            raise RuntimeError(
+                f"The fresh chat did not settle at an idle prompt within {limit:g}s after /clear ({summary})."
+            )
+        time.sleep(POLL)
 
 
 def worker_status(terminal):
@@ -450,73 +676,138 @@ def worker_status(terminal):
     return "\n".join(workers)
 
 
-def hold_for_cancel(record, state, screen, seconds):
-    """Keep the idle, unchanged prompt for the grace window; any input or cancel fails closed."""
-    off = state.parent / ".off"
+def hold_for_cancel(record, state, screen, seconds, turn):
+    """Keep the idle, unchanged prompt and Herdr turn for the grace window; any change fails closed."""
     deadline = time.monotonic() + seconds
     while True:
-        if off.exists() or state.with_suffix(".cancelled").exists():
+        if stopped(state):
             raise RuntimeError("Handoff was cancelled before /clear.")
         info = terminal_info(record["terminal"], record["cwd"], record["pid"])
         if (
-            not info or active_status(info) not in {"done", "idle"}
+            not info or active_status(info) not in {"done", "idle"} or info.get("turn") != turn
             or read_composer(record["terminal"]) != screen
         ):
             raise RuntimeError("The terminal changed before /clear; the handoff note is left for manual recovery.")
         if time.monotonic() >= deadline:
             return
-        time.sleep(0.2)
+        time.sleep(POLL)
 
 
 def switch_chat(state):
     record = json.loads(state.read_text(encoding="utf-8"))
     terminal = record["terminal"]
-    note = state.with_suffix(".md")
-    receipt = state.with_suffix(".received")
     lock_path = state.parent.parent / f"{terminal}.lock"
     fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT, 0o600)
     with os.fdopen(fd, "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        workers = worker_status(terminal)
-        if workers:
-            with note.open("a", encoding="utf-8") as stream:
-                stream.write(f"\nLive Herdr children of {terminal} at handoff:\n{workers}\n")
-        screen = await_old_chat(record)
-        hold_for_cancel(record, state, screen, grace())
-        turn = recent_turn(record["transcript"])
-        if not turn or turn["id"] != record["turn"]:
-            raise RuntimeError("A new turn started before /clear.")
-        hold_for_cancel(record, state, screen, 0)  # final recheck immediately before /clear
-        hc("keys", "--json", terminal, "/", "c", "l", "e", "a", "r", "enter")
-        await_fresh_chat(record, screen)
-        prompt = (
-            f"Codex Context Handoff: {record['session']} {record['turn']} {record['nonce']} "
-            f"Read the local handoff note at {json.dumps(str(note))}. Check the working tree and live Herdr "
-            "workers before resuming the remaining work. Preserve the user's scope and decisions."
+        try:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError(f"Another handoff is switching terminal {terminal}.") from None
+            switch_locked(record, state)
+        except BaseException as error:
+            # Close before disarming, so a late continuation always meets .closed or the guard.
+            new_private_file(state.with_suffix(".closed"), f"{error}\n")
+            raise
+        finally:
+            disarm_guard(state, record)
+
+
+def switch_locked(record, state):
+    terminal = record["terminal"]
+    note = state.with_suffix(".md")
+    receipt = state.with_suffix(".received")
+    arm_guard(state, record)
+    start_turn = herdr_turn(terminal_info(terminal, record["cwd"], record["pid"]))
+    log(f"switch for {terminal} (pid {record['pid']}) started at Herdr turn {start_turn}")
+    workers = worker_status(terminal)
+    if workers:
+        with note.open("a", encoding="utf-8") as stream:
+            stream.write(f"\nLive Herdr children of {terminal} at handoff:\n{workers}\n")
+    screen, turn = await_old_chat(record, start_turn)
+    log(f"old chat idle at Herdr turn {turn}; holding {grace():g}s for cancellation")
+    hold_for_cancel(record, state, screen, grace(), turn)
+    latest = recent_turn(record["transcript"])
+    if not latest or latest["id"] != record["turn"]:
+        raise RuntimeError("A new turn started before /clear.")
+    hold_for_cancel(record, state, screen, 0, turn)  # final recheck immediately before /clear
+    cleared = hc("keys", "--json", terminal, "/", "c", "l", "e", "a", "r", "enter")
+    log(f"/clear sent: {json.dumps(cleared)}")
+    # hc keys waits for a quiet moment first; the chat must still be the one just checked.
+    if cleared.get("turn") != turn or cleared.get("status") not in {"done", "idle"}:
+        raise RuntimeError(f"The terminal changed while /clear was typed ({json.dumps(cleared)}).")
+    cache = {}
+    settled = await_fresh_chat(record, state, screen, turn, cache)
+    # Final recheck immediately before the continuation; one send, never retried.
+    view = look(record)
+    problem = fresh_chat_problem(view, state, record, screen, turn, False, cache)
+    if problem or view[0] != "idle" or view[1:] != settled:
+        raise RuntimeError(
+            f"{problem or 'The fresh chat changed'} just before the continuation ({describe(view, screen)})."
         )
-        sent = hc("send", "--json", "--if", "idle", terminal, prompt)
-        if not sent.get("started"):
-            raise RuntimeError("Herdr did not accept the continuation prompt.")
-        deadline = time.monotonic() + 12
-        while time.monotonic() < deadline:
-            if receipt.is_file():
-                print(f"Continuation received by {receipt.read_text(encoding='utf-8').strip()}.")
-                return
-            time.sleep(0.2)
-        raise RuntimeError("Continuation delivery could not be confirmed. Inspect the terminal before retrying.")
+    sent = hc("send", "--json", "--if", "idle", terminal, continuation(record, state))
+    log(f"continuation sent: {json.dumps(sent)}")
+    if not sent.get("started"):
+        raise RuntimeError("Herdr did not accept the continuation prompt.")
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        if receipt.is_file():
+            log(f"Continuation received by {receipt.read_text(encoding='utf-8').strip()}.")
+            return
+        time.sleep(POLL)
+    raise RuntimeError("Continuation delivery could not be confirmed. Inspect the terminal before retrying.")
+
+
+def mark_takeover(payload, root, terminal):
+    """Stop this terminal's pending handoff on any prompt other than its exact continuation."""
+    try:
+        session, turn, nonce = (root / f"{terminal}.switch").read_text(encoding="utf-8").split()
+        state = store_for(root, session, turn)
+        record = json.loads(state.read_text(encoding="utf-8"))
+        if record["nonce"] != nonce or record["terminal"] != terminal:
+            return None
+        expected = continuation(record, state)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None  # no armed guard; the switch itself fails closed without one
+    if any(state.with_suffix(suffix).exists() for suffix in DONE):
+        return None
+    if (payload.get("prompt") or "").strip() == expected:
+        return None
+    chat = payload.get("session_id") or ""
+    new_private_file(state.with_suffix(".cancelled"), (
+        f"a prompt was submitted in chat {chat if ID.fullmatch(chat) else 'unknown'} before the continuation\n"
+    ))
+    return (
+        "Context handoff stopped: a prompt was submitted before the continuation. "
+        "The handoff note stays in the plugin data directory."
+    )
 
 
 def prompt_hook(payload, root, terminal):
-    match = RESUME.match(payload.get("prompt") or "")
+    text = (payload.get("prompt") or "").strip()
+    match = RESUME.search(text)
     if not match:
         return {}
     source, turn, nonce = match.groups()
-    state = store_for(root, source, turn)
-    if not state.with_suffix(".md").is_file():
+    try:
+        state = store_for(root, source, turn)
+    except ValueError:
+        return {}
+    note = state.with_suffix(".md")
+    if not note.is_file():
         return {}
     record = json.loads(state.read_text(encoding="utf-8"))
     if nonce != record["nonce"] or terminal != record["terminal"]:
         return {}
+    manual = f" Read the handoff note at {note} yourself if the work should continue."
+    if text != continuation(record, state):
+        # A draft or another message got mixed in; never run it as a handoff.
+        new_private_file(state.with_suffix(".cancelled"), "the continuation arrived mixed with other text\n")
+        return {"decision": "block", "reason": "The handoff prompt arrived mixed with other text, so it was not run." + manual}
+    if state.with_suffix(".cancelled").exists():
+        return {"decision": "block", "reason": "This handoff was cancelled before its continuation arrived." + manual}
+    if state.with_suffix(".closed").exists():
+        return {"decision": "block", "reason": "This handoff stopped before its continuation arrived." + manual}
     destination = payload.get("session_id", "")
     if destination == source or not same_cwd(payload.get("cwd"), record["cwd"]):
         return {"decision": "block", "reason": "This handoff must open in a fresh chat in the original worktree."}
@@ -542,21 +833,34 @@ def main():
         return
     root = Path(root)
     event = payload.get("hook_event_name")
+    opted_in = os.environ.get("CODEX_CONTEXT_HANDOFF") == "1" and TERMINAL.fullmatch(terminal)
     if event == "UserPromptSubmit":
+        notice = mark_takeover(payload, root, terminal) if opted_in else None
         # Controls work even without the opt-in so `handoff status` can explain why.
         result = control_hook(payload, root, terminal)
         if result is not None:
-            print(json.dumps(result))
+            if notice:
+                result["reason"] += f" {notice}"
+        elif opted_in:
+            mark_closing(payload, root)
+            result = prompt_hook(payload, root, terminal)
+            if notice and "decision" not in result:
+                result["systemMessage"] = notice
+        else:
             return
-    if os.environ.get("CODEX_CONTEXT_HANDOFF") != "1" or not TERMINAL.fullmatch(terminal):
+        print(json.dumps(result), flush=True)
+        if opted_in:
+            try:
+                note_prompt_hook(payload, root, terminal)
+            except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+                pass  # missing evidence only shortens a later startup wait
+        return
+    if not opted_in:
         return
     if event == "Stop":
         print(json.dumps(stop_hook(payload, root, terminal)))
     elif event == "PostToolUse":
         print(json.dumps(tool_hook(payload, root, terminal)))
-    elif event == "UserPromptSubmit":
-        mark_closing(payload, root)
-        print(json.dumps(prompt_hook(payload, root, terminal)))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 {
   "name": "codex-context-handoff",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Continue long Codex CLI tasks in a fresh chat in the same Herdr terminal, with a launcher and per-chat handoff off/on/status.",
   "author": {
     "name": "ulttla",
