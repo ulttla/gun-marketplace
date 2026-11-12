@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parseClaude, parseAgy, buildCapture, sessionKey, agyWindow } from "../lib/capture.mjs";
 import { mergeWindows, groupsFromCaptures, contextsFromCaptures } from "../lib/merge.mjs";
@@ -183,7 +184,7 @@ test("agy: old cached labels are relabelled from the id at merge time", () => {
 
 test("capture: prunes only old wrapper temp files", async () => {
   const { pruneWrapperTemps } = await import("../lib/capture.mjs");
-  const d = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "hu-prune-"));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "hu-prune-"));
   for (const n of ["herdr-usage-sl.OLD", "herdr-usage-sl.NEW", "other.OLD"]) fs.writeFileSync(path.join(d, n), "x");
   const old = new Date(Date.now() - 600_000);
   fs.utimesSync(path.join(d, "herdr-usage-sl.OLD"), old, old);

@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +34,13 @@ jobs:
         run: node plugins/herdr/herdr-usage/test/catalog-check.mjs
       - name: Syntax of the mods
         working-directory: plugins/herdr/herdr-usage
+        shell: bash
         run: for f in mod/*/main.js mod/shared/fmt.js; do node --check "$f"; done
       - name: Tests (synthetic fixtures, temporary HOME, stub herdr-app; no credentials or network)
+        if: runner.os != 'Windows'
         working-directory: plugins/herdr/herdr-usage
         run: node --test test/*.test.mjs
+      - name: Windows parsers and native statusline wrapper
+        if: runner.os == 'Windows'
+        working-directory: plugins/herdr/herdr-usage
+        run: node --test test/parse.test.mjs test/windows.test.mjs

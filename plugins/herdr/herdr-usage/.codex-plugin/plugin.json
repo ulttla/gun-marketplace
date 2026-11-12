@@ -1,6 +1,6 @@
 {
   "name": "herdr-usage",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Subscription usage for Codex, Claude Code, Antigravity and Ollama Cloud in the Herdr app's status bar, with a detail popup.",
   "author": {
     "name": "ulttla",

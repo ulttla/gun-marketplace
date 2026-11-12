@@ -5,7 +5,7 @@ description: Install, update, check or remove the herdr-usage status bar, which 
 
 # herdr-usage
 
-The plugin root is `<directory containing this SKILL.md>/../..`. It holds `install.mjs`, `uninstall.mjs`, `status.mjs` and the files they install. Run them with Node.js 22 or newer from any folder; the commands below write `<root>` for the plugin root's absolute path. Only macOS and Linux are supported.
+The plugin root is `<directory containing this SKILL.md>/../..`. It holds `install.mjs`, `uninstall.mjs`, `status.mjs` and the files they install. Run them with Node.js 22 or newer from any folder; the commands below write `<root>` for the plugin root's absolute path. macOS, Linux and Windows are supported. On Windows, the installer discovers a native Codex executable; use `HERDR_USAGE_CODEX` to override it with an absolute `codex.exe` path (not a `.cmd` or `.ps1` launcher).
 
 Nothing installs on its own: run the installer when the person asks to install or update herdr-usage. That request is the approval; in one short message say what it changes (below), then run it. Ask only when something outside that scope is needed, such as resolving a name collision.
 
