@@ -942,6 +942,7 @@ class GoalTransferTests(unittest.TestCase):
             reason = handoff.stop_hook(self.payload(turn_id="later"), self.root, "t1")["reason"]
             self.assertIn("GOAL TRANSFER", reason)
             self.goal_turn(turn="again")
+            self.assertIn("put off", handoff.stop_hook(self.payload(turn_id="again"), self.root, "t1")["systemMessage"])
             self.assertEqual(handoff.stop_hook(self.payload(turn_id="again"), self.root, "t1"), {})
         self.assertFalse(handoff.store_for(self.root, "session", "next").exists())  # nothing old resurrected
 
@@ -966,9 +967,13 @@ class GoalTransferTests(unittest.TestCase):
         record = json.loads(self.state.read_text())
         self.assertEqual(record["goal"]["mode"], "transfer")
         self.assertEqual(record["goal"]["arm"]["objective_sha256"], handoff.digest(OBJECTIVE))
+        # A later turn means the armed one ended without its note (interrupted): it is put off, and the
+        # next request needs 5 more points of context use.
         self.goal_turn(turn="next")
         with self.eligible():
+            self.assertIn("put off", handoff.stop_hook(self.payload(turn_id="next"), self.root, "t1")["systemMessage"])
             self.assertEqual(handoff.stop_hook(self.payload(turn_id="next"), self.root, "t1"), {})
+        self.assertFalse(handoff.store_for(self.root, "session", "next").exists())
 
     def test_non_active_goal_is_left_alone(self):
         self.set_goal(status="paused")
@@ -1201,9 +1206,11 @@ class GoalTransferTests(unittest.TestCase):
         after = self.pre("exec")["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("make no more tool calls", after)
         self.assertEqual(self.pre("get_goal"), {})
-        # Another turn of the same chat does not arm a second transfer while this one is pending.
+        # A later turn means this one ended without its note: settled at once, and no new arm at the same usage.
         self.goal_turn(turn="next")
+        self.assertIn("put off", self.pre(turn="next")["systemMessage"])
         self.assertEqual(self.pre(turn="next"), {})
+        self.assertFalse(handoff.store_for(self.root, "session", "next").exists())
 
     def test_gate_never_arms_without_an_active_goal_consent_or_room(self):
         self.goal_turn()
@@ -1361,6 +1368,72 @@ class GoalTransferTests(unittest.TestCase):
         self.assertTrue(denied(self.pre(turn="next")))
         self.assertIn("put off", self.state.with_suffix(".closed").read_text())
         self.assertTrue(handoff.store_for(self.root, "session", "next").is_file())
+
+    def test_an_interrupted_stop_request_does_not_leave_an_orphan(self):
+        # A Stop-armed transfer whose turn was interrupted (no note, no later Stop in that turn).
+        self.arm()
+        self.append(*hook_prompt(handoff.handoff_request(self.nonce)))
+        self.goal_turn(turn="next", used=47)
+        result = self.pre(turn="next")
+        self.assertTrue(denied(result))  # settled, then armed again at this tool call
+        self.assertIn("put off (the turn ended without a handoff note)", result["systemMessage"])
+        self.assertIn("put off", self.state.with_suffix(".closed").read_text())
+        # Interrupted after the pause: failed closed, never re-armed, and the user is told it stays paused.
+        shutil.rmtree(self.root / "session")
+        self.arm()
+        self.pause()
+        self.goal_turn(turn="next", used=47)
+        with self.eligible():
+            result = handoff.stop_hook(self.payload(turn_id="next"), self.root, "t1")
+        self.assertIn("Resume it with /goal", result["systemMessage"])
+        self.assertTrue((self.root / "session" / ".goal-wait").is_file())
+        self.assertFalse(handoff.store_for(self.root, "session", "next").exists())
+        # Interrupted before our request reached the transcript: the Goal is untouched, so put off.
+        shutil.rmtree(self.root / "session")
+        self.set_goal()
+        self.arm()
+        self.goal_turn(turn="next", used=47)
+        with self.eligible():
+            self.assertIn("put off", handoff.stop_hook(self.payload(turn_id="next"), self.root, "t1")["systemMessage"])
+            again = handoff.stop_hook(self.payload(turn_id="next"), self.root, "t1")
+        self.assertIn("GOAL TRANSFER", again["reason"])
+
+    def test_an_interrupted_plain_handoff_does_not_block_handoff_now(self):
+        self.write_events(self.meta, event("task_started", turn_id="turn"), event("token_count", info=usage(41)))
+        with self.eligible():
+            self.assertEqual(handoff.stop_hook(self.payload(), self.root, "t1")["decision"], "block")
+        self.goal_turn(turn="next", trigger="user", used=20)
+        payload = dict(self.payload(turn_id="next"), prompt="handoff now")
+        with self.eligible():
+            result = handoff.manual_hook(payload, self.root, "t1")
+        self.assertIn("additionalContext", result["hookSpecificOutput"])
+        self.assertIn("ended without a handoff note",
+                      handoff.store_for(self.root, "session", "turn").with_suffix(".closed").read_text())
+
+    def test_a_failed_arm_never_leaks_the_transfer_latch(self):
+        # The gate gave up in this turn; an explicit `handoff now` in the same turn is refused cleanly.
+        self.active_goal_turn()
+        self.gate_arm()
+        for _ in range(4 + handoff.MAX_DENIALS):
+            self.pre("apply_patch")
+        self.assertFalse((self.root / "session" / ".goal-requested").exists())
+        with self.eligible():
+            result = handoff.manual_hook(dict(self.payload(), prompt="handoff now"), self.root, "t1")
+        self.assertIn("this turn already has a handoff", result["reason"])
+        self.assertFalse((self.root / "session" / ".goal-requested").exists())
+        # A lost race on the record itself rolls back the latch it created.
+        self.goal_turn(turn="race", used=60)
+        info = {"foreground": {"pid": 123}}
+        goal = {"mode": "transfer", "since": "x", "arm": handoff.goal_state(self.transcript, "session")[1]}
+        def lose_the_record(path, _):  # the latch is created; another process wrote the record first
+            if path.name != ".goal-requested":
+                return False
+            path.write_text("")
+            return True
+
+        with patch.object(handoff, "new_private_file", side_effect=lose_the_record):
+            self.assertIsNone(handoff.arm_record(self.payload(turn_id="race"), self.root, "t1", info, goal, "tool", 60))
+        self.assertFalse((self.root / "session" / ".goal-requested").exists())
 
     def test_compaction_releases_a_gate_that_has_not_paused(self):
         self.active_goal_turn()

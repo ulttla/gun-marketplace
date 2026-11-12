@@ -941,7 +941,10 @@ def arm_record(payload, root, terminal, info, goal, origin, used, prompt=None):
     transcript = payload["transcript_path"]
     folder, state = root / session, store_for(root, session, turn)
     state.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if goal and goal["mode"] == "transfer" and not new_private_file(folder / ".goal-requested", turn + "\n"):
+    if state.exists():
+        return None  # this turn already had a handoff, even a closed one
+    latch = goal and goal["mode"] == "transfer"
+    if latch and not new_private_file(folder / ".goal-requested", turn + "\n"):
         return None
     record = {
         "session": session, "turn": turn, "cwd": payload["cwd"], "terminal": terminal,
@@ -953,6 +956,8 @@ def arm_record(payload, root, terminal, info, goal, origin, used, prompt=None):
     if goal:
         record["goal"] = goal
     if not new_private_file(state, json.dumps(record)):
+        if latch:
+            (folder / ".goal-requested").unlink(missing_ok=True)  # ours: never leave a latch without a record
         return None
     return record
 
@@ -1031,25 +1036,26 @@ def gate_hook(payload, root, terminal):
     if limit is None or not latest or latest["id"] != turn or not headroom(folder, transcript, latest["usage"], limit):
         return {}
     used = usage_percent(latest["usage"])
-    settle_orphans(folder, turn)
+    notice = settle_orphans(folder, turn)
+    shown = {"systemMessage": notice} if notice else {}
     if transfer_blocked(folder, used) or pending(folder) or not confirm_restore(folder, transcript, session):
-        return {}
+        return shown
     status, row = goal_state(transcript, session, latest.get("trigger"))
     if status != "row" or row["status"] != "active" or (
         row["token_budget"] is not None and row["token_budget"] - row["tokens_used"] <= 0
     ):
-        return {}  # the Stop hook reports unknown state and exhausted budgets once
+        return shown  # the Stop hook reports unknown state and exhausted budgets once
     info, _ = check_chat(payload, terminal)
     consent = goal_consent(root)
     if not info or not consent:
-        return {}
+        return shown
     record = arm_record(payload, root, terminal, info, {"mode": "transfer", "since": consent["since"], "arm": row},
                         "tool", used)
     if not record:
-        return {}
+        return shown
     budget = checkpoint_calls()
     replace_private(state.with_suffix(".gate"), json.dumps({"checkpoint": budget, "denied": 0, "updated": None}))
-    return deny(mid_turn_request(record, gate_lead(budget)))
+    return dict(deny(mid_turn_request(record, gate_lead(budget))), **shown)
 
 
 class open_lock:
@@ -1146,16 +1152,24 @@ def settle(state, record, why):
 
 
 def settle_orphans(folder, turn):
-    """A transfer armed mid-turn in an earlier turn that ended without Stop (an interrupt): settle it."""
+    """A handoff armed in an earlier turn that ended without its note (an interrupt, say) is over: a
+    Goal transfer is settled (put off while the Goal is untouched, else failed closed), any other
+    handoff is closed. Without this it would stay pending and block every later handoff in the chat.
+    Returns the messages for the user, joined."""
+    messages = []
     for state in pending(folder):
         if state.name == turn or state.with_suffix(".md").exists():
             continue
         try:
             record = json.loads(state.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            new_private_file(state.with_suffix(".closed"), "unreadable handoff record\n")
             continue
-        if goal_moves(record) and record.get("origin") in {"tool", "manual"}:
-            settle(state, record, "the turn ended without a handoff note")
+        if goal_moves(record):
+            messages.append(settle(state, record, "the turn ended without a handoff note").get("systemMessage"))
+        else:
+            new_private_file(state.with_suffix(".closed"), "the turn ended without a handoff note\n")
+    return " ".join(filter(None, messages))
 
 
 def give_up(state, record, gate):
@@ -1198,9 +1212,13 @@ def untouched(state, record):
     """Whether the armed Goal is still active and no Goal tool ran since the arm."""
     rows = armed_rows(record)
     status, row = goal_state(record["transcript"], record["session"])
-    return rows is not None and goal_calls(rows) == (0, 0) and status == "row" and row["status"] == "active" and (
-        row["goal_id"] == record["goal"]["arm"]["goal_id"]
-    )
+    arm = record["goal"]["arm"]
+    if status != "row" or row["status"] != "active" or row["goal_id"] != arm["goal_id"]:
+        return False
+    if rows is None:
+        # Our request never reached the transcript (interrupted first), so the model never saw it.
+        return row["updated_at_ms"] == arm["updated_at_ms"]
+    return goal_calls(rows) == (0, 0)
 
 
 def stop_request_again(record, state):
@@ -1230,6 +1248,7 @@ def arm_now(payload, root, terminal, prompt=None):
     info, why = check_chat(payload, terminal)
     if not info:
         return None, why
+    settle_orphans(folder, turn)
     if pending(folder):
         return None, "a handoff is already pending in this chat"
     status, row = goal_state(transcript, session)
@@ -1376,6 +1395,9 @@ def stop_hook(payload, root, terminal):
     if not info:
         return {}
     used = usage_percent(latest["usage"])
+    notice = settle_orphans(folder, turn_id)
+    if notice:
+        return {"systemMessage": notice}  # the next Stop past the threshold arms again if it may
     status, row = goal_state(transcript, session, latest.get("trigger"))
     if status == "unknown":
         return goal_wait(folder, f"could not read Goal state: {row}")  # never treated as no Goal
