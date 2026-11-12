@@ -733,6 +733,9 @@ class ContextHandoffTests(unittest.TestCase):
                 handoff.note_prompt_hook(payload, self.root, "t1")
             self.assertEqual(evidence.read_text(), expected + "\n")
         self.assertFalse(handoff.prompt_hook_evidence(state, record))  # resumed in pid 456
+        # The transfer helper's record for this chat names this hook script and the same process.
+        self.assertEqual((state.parent / ".hook-script").read_text(), handoff.hook_script_record(456))
+        self.assertFalse((self.root / ".hook-script").exists())  # never a data-wide record
         self.assertTrue(handoff.prompt_hook_evidence(state, dict(record, pid=456)))
         with patch.object(handoff, "in_foreground_tree", return_value=True), (
             patch.object(handoff, "terminal_info")
@@ -750,7 +753,8 @@ class ContextHandoffTests(unittest.TestCase):
         payload["session_id"] = "fresh"
         self.assertEqual(handoff.prompt_hook(payload, self.root, "t1"), {})
         self.assertEqual(state.with_suffix(".received").read_text(), "fresh\n")
-        self.assertTrue((self.root / "fresh" / "other.skip").is_file())
+        self.assertFalse((self.root / "fresh" / "other.skip").exists())  # the receiving turn is checked as usual
+        self.assertEqual((self.root / "fresh" / ".received-from").read_text(), "old turn\n")
         self.assertEqual(handoff.prompt_hook(payload, self.root, "t1")["decision"], "block")
 
 
@@ -798,6 +802,10 @@ def hook_prompt(*texts, ident="msg"):
     ]
 
 
+def denied(result):
+    return (result.get("hookSpecificOutput") or {}).get("permissionDecision") == "deny"
+
+
 def steer(text="<hc>worker done</hc>"):
     return event("item_completed", item={"type": "UserMessage", "id": "u", "content": [{"type": "text", "text": text}]})
 
@@ -832,11 +840,11 @@ class GoalTransferTests(unittest.TestCase):
         with patch.object(handoff, "check_chat", return_value=(None, "test")):
             self.control("handoff goal transfer on")
 
-    def goal_turn(self, session="session", turn="turn", trigger="goal"):
+    def goal_turn(self, session="session", turn="turn", trigger="goal", used=41):
         self.write_events(self.meta, {"type": "event_msg", "payload": {
             "type": "task_started", "turn_id": turn,
             "turn_attribution": {"turn_id": turn, "turn_trigger": trigger},
-        }}, event("token_count", info=usage(41)))
+        }}, event("token_count", info=usage(used)))
 
     def arm(self, **goal):
         """An active Goal turn past the threshold whose Stop hook asked for the transfer."""
@@ -995,16 +1003,15 @@ class GoalTransferTests(unittest.TestCase):
             self.assertIn("changed during the handoff", result["systemMessage"])
             self.assertIn("goal changed", self.state.with_suffix(".closed").read_text())
 
-    def test_goal_turn_nudge_once_per_chat_and_only_with_consent(self):
+    def test_goal_turns_get_no_advisory_nudge(self):
+        # 0.3.0 nudged a Goal turn once and the model worked on for 3 hours (CloudSight 01a1cf6a); the
+        # PreToolUse gate arms Goal turns now, so PostToolUse stays silent for them.
+        self.set_goal()
         self.goal_turn()
         with self.eligible():
-            self.assertEqual(handoff.tool_hook(self.payload(), self.root, "t1"), {})  # no consent
+            self.assertEqual(handoff.tool_hook(self.payload(), self.root, "t1"), {})
             self.consent()
-            first = handoff.tool_hook(self.payload(), self.root, "t1")
-            self.goal_turn(turn="next")
-            second = handoff.tool_hook(self.payload(turn_id="next"), self.root, "t1")
-        self.assertIn("the Stop hook will handle the Goal transfer", first["hookSpecificOutput"]["additionalContext"])
-        self.assertEqual(second, {})
+            self.assertEqual(handoff.tool_hook(self.payload(), self.root, "t1"), {})
         self.goal_turn(turn="typed", trigger="user")  # a turn the user started keeps the per-turn nudge
         with self.eligible():
             self.assertIn("safe", handoff.tool_hook(self.payload(turn_id="typed"), self.root, "t1")
@@ -1137,6 +1144,390 @@ class GoalTransferTests(unittest.TestCase):
         self.assertIn("Goal is paused but its transfer could not be verified", result["systemMessage"])
         self.assertTrue((self.root / "session" / ".goal-wait").is_file())
 
+    # --- 0.4.0: the PreToolUse gate arms a transfer at a tool boundary ---
+
+    def pre(self, tool="exec_command", tool_input=None, session="session", turn="turn"):
+        payload = self.payload(session_id=session, turn_id=turn, hook_event_name="PreToolUse", tool_name=tool,
+                               tool_input={} if tool_input is None else tool_input, tool_use_id="u")
+        with self.eligible():
+            return handoff.gate_hook(payload, self.root, "t1")
+
+    def gate_arm(self, budget=None, session="session", turn="turn"):
+        result = self.pre(session=session, turn=turn)
+        self.assertTrue(denied(result), result)
+        self.state = handoff.store_for(self.root, session, turn)
+        self.nonce = json.loads(self.state.read_text())["nonce"]
+        return result["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def gate_pause(self, used=858236, budget=None, thread="session", created=CREATED_MS, seconds=4597):
+        """The model's native Goal calls after a mid-turn arm (no hook prompt is recorded for it)."""
+        line = lambda status, tokens, at: goal_line(status, tokens, at, thread=thread, created=created // 1000,
+                                                    budget=budget, seconds=seconds)
+        self.append(exec_call("g1", 'text(await tools.get_goal({}));'),
+                    exec_output("g1", line("active", used - 10, PAUSED_MS // 1000 - 5)),
+                    exec_call("g2", 'text(await tools.update_goal({status:"paused"}));'),
+                    exec_output("g2", line("paused", used, PAUSED_MS // 1000)))
+        self.set_goal(thread=thread, status="paused", tokens_used=used, updated_at_ms=PAUSED_MS,
+                      time_used_seconds=seconds, token_budget=budget, created_at_ms=created)
+
+    def active_goal_turn(self, budget=None, used=41):
+        self.set_goal(token_budget=budget)
+        self.consent()
+        self.goal_turn(used=used)
+
+    def test_gate_arms_at_a_tool_boundary_and_holds_the_turn_to_the_transfer(self):
+        self.active_goal_turn(budget=1_000_000)
+        size = self.transcript.stat().st_size
+        reason = self.gate_arm()
+        self.assertIn("this tool call was not run", reason)
+        self.assertIn("at most 3 more tool call(s), only to reach a safe checkpoint", reason)
+        self.assertIn("GOAL TRANSFER (authorized", reason)
+        self.assertIn(f"HANDOFF READY {self.nonce} GOAL transferred", reason)
+        record = json.loads(self.state.read_text())
+        self.assertEqual((record["origin"], record["offset"], record["goal"]["mode"]), ("tool", size, "transfer"))
+        self.assertTrue((self.root / "session" / ".goal-requested").is_file())
+        for tool in ("apply_patch", "exec_command", "mcp__herdr__send"):
+            self.assertEqual(self.pre(tool), {}, tool)  # the safe-checkpoint allowance
+        # No substring bypass: only the exact native Goal tools are special.
+        for tool, args in (("exec_command", {"cmd": "echo update_goal paused"}), ("mcp__x__update_goal", {"status": "paused"}),
+                           ("create_goal", {"objective": "x"}), ("update_goal", {"status": "complete"}),
+                           ("update_goal", {"status": "active"})):
+            self.assertTrue(denied(self.pre(tool, args)), (tool, args))
+        self.assertIn("allowance is used up", self.pre("exec_command")["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertEqual(self.pre("exec"), {})  # code mode's script tool: its nested calls are gated one by one
+        self.assertEqual(self.pre("get_goal"), {})
+        self.assertEqual(self.pre("functions.update_goal", '{"status": "paused"}'), {})
+        self.assertTrue(denied(self.pre("update_goal", {"status": "paused"})))  # one pause only
+        after = self.pre("exec")["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("make no more tool calls", after)
+        self.assertEqual(self.pre("get_goal"), {})
+        # Another turn of the same chat does not arm a second transfer while this one is pending.
+        self.goal_turn(turn="next")
+        self.assertEqual(self.pre(turn="next"), {})
+
+    def test_gate_never_arms_without_an_active_goal_consent_or_room(self):
+        self.goal_turn()
+        self.assertEqual(self.pre(), {})  # no Goal
+        self.set_goal()
+        self.assertEqual(self.pre(), {})  # no consent
+        self.consent()
+        self.set_goal(status="paused")  # paused before any arm: left alone, never recreated
+        self.assertEqual(self.pre(), {})
+        self.set_goal(token_budget=10, tokens_used=10)
+        self.assertEqual(self.pre(), {})
+        self.set_goal()
+        self.goal_turn(used=40)
+        self.assertEqual(self.pre(), {})  # not past the threshold
+        self.goal_turn()
+        self.assertEqual(self.pre("update_goal", {"status": "complete"}), {})  # Goal tools never arm
+        with patch.object(handoff, "check_chat", return_value=(None, "not here")):
+            self.assertEqual(self.pre(), {})
+        self.control("handoff off")
+        self.assertEqual(self.pre(), {})
+        self.assertFalse(handoff.store_for(self.root, "session", "turn").exists())
+        self.control("handoff on")
+        self.assertTrue(denied(self.pre()))
+        self.control("handoff off")  # cancels the armed transfer and frees the turn at once
+        self.assertEqual(self.pre("apply_patch"), {})
+        self.assertTrue(handoff.store_for(self.root, "session", "turn").with_suffix(".cancelled").is_file())
+
+    def test_gate_locks_once_the_db_shows_the_pause_without_a_native_hook(self):
+        # Codex may not run PreToolUse for its own Goal tools; the DB still shows the pause.
+        self.active_goal_turn()
+        self.gate_arm()
+        self.set_goal(status="paused", updated_at_ms=PAUSED_MS)
+        for tool in ("apply_patch", "exec"):
+            reason = self.pre(tool)["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertIn("The Goal is paused for the transfer; make no more tool calls", reason)
+        self.assertEqual(self.pre("get_goal"), {})
+
+    def test_gate_refuses_work_visibly_when_the_goal_db_cannot_be_read(self):
+        self.active_goal_turn()
+        self.gate_arm()
+        self.db.write_bytes(b"garbage" * 100)
+        first, second = self.pre("apply_patch"), self.pre("apply_patch")
+        self.assertTrue(denied(first) and denied(second))
+        self.assertIn("could not be read", first["systemMessage"])
+        self.assertNotIn("systemMessage", second)
+
+    def test_mid_turn_transfer_is_proved_from_the_arm_and_switches(self):
+        self.active_goal_turn(budget=1_000_000)
+        self.gate_arm()
+        self.gate_pause(budget=1_000_000)
+        result, launch = self.capture()
+        launch.assert_called_once()
+        moved = json.loads(self.state.with_suffix(".goal.json").read_text())
+        self.assertEqual((moved["remaining"], moved["lineage"]["hops"]), (141764, 1))
+        # The arm's DB snapshot is the active-before proof: a model that pauses without printing get_goal
+        # still transfers; a pause printed before the arm is not counted.
+        shutil.rmtree(self.root / "session")
+        self.active_goal_turn(budget=1_000_000)
+        self.gate_arm()
+        self.append(exec_call("p", 'text(await tools.update_goal({status:"paused"}));'),
+                    exec_output("p", goal_line("paused", 858236, PAUSED_MS // 1000, budget=1_000_000)))
+        self.set_goal(status="paused", tokens_used=858236, updated_at_ms=PAUSED_MS, time_used_seconds=4597,
+                      token_budget=1_000_000)
+        self.assertEqual(self.capture()[1].call_count, 1)
+        shutil.rmtree(self.root / "session")
+        self.active_goal_turn(budget=1_000_000)
+        self.append(exec_call("early", 'text(await tools.update_goal({status:"paused"}));'),
+                    exec_output("early", goal_line("paused", 858236, PAUSED_MS // 1000, budget=1_000_000)))
+        self.gate_arm()
+        self.set_goal(status="paused", tokens_used=858236, updated_at_ms=PAUSED_MS, time_used_seconds=4597,
+                      token_budget=1_000_000)
+        result, launch = self.capture()
+        launch.assert_not_called()
+        self.assertIn("exactly as requested", self.state.with_suffix(".closed").read_text())
+
+    def test_stop_asks_once_more_when_a_mid_turn_arm_ends_without_the_note(self):
+        self.active_goal_turn()
+        self.gate_arm()
+        self.assertEqual(self.pre("update_goal", {"status": "paused"}), {})
+        self.gate_pause()
+        with self.eligible():
+            again = handoff.stop_hook(self.payload(last_assistant_message="Paused."), self.root, "t1")
+        self.assertEqual(again["decision"], "block")
+        self.assertIn("the Goal was paused for the transfer. Do not call any Goal tool again", again["reason"])
+        self.assertIn(f"HANDOFF READY {self.nonce} GOAL transferred", again["reason"])
+        result, launch = self.capture()
+        launch.assert_called_once()
+        # Not paused and never answered: the full request once more, then the usual failure.
+        shutil.rmtree(self.root / "session")
+        self.set_goal()
+        self.active_goal_turn()
+        self.gate_arm()
+        with self.eligible():
+            again = handoff.stop_hook(self.payload(last_assistant_message="Working."), self.root, "t1")
+            self.assertIn("GOAL TRANSFER", again["reason"])
+            final = handoff.stop_hook(self.payload(last_assistant_message="Still working."), self.root, "t1")
+        self.assertIn("active Goal was not paused", final["systemMessage"])
+        self.assertTrue((self.root / "session" / ".goal-wait").is_file())
+
+    def test_long_goal_turn_progression_is_bounded_and_retried(self):
+        # CloudSight 01a1cf6a: one advisory at 40% and the Goal turn ran on for 3 hours to 82%.
+        self.active_goal_turn()
+        self.gate_arm()
+        for _ in range(3):
+            self.pre("apply_patch")
+        for _ in range(handoff.MAX_DENIALS):
+            self.assertTrue(denied(self.pre("apply_patch")))
+        given_up = self.pre("apply_patch")
+        self.assertNotIn("hookSpecificOutput", given_up)
+        self.assertIn("put off (the model kept calling tools after 12 denials)", given_up["systemMessage"])
+        self.assertIn("gave up", self.state.with_suffix(".released").read_text())
+        self.assertTrue(self.state.with_suffix(".closed").is_file())
+        self.assertFalse((self.root / "session" / ".goal-requested").exists())
+        self.assertEqual(self.pre("apply_patch"), {})
+        with self.eligible():
+            self.assertEqual(handoff.stop_hook(self.payload(last_assistant_message="x"), self.root, "t1"), {})
+        # The next Goal turn re-arms only after 5 more points, and at most 3 attempts in all.
+        for attempt, used in ((2, 46), (3, 51)):
+            self.goal_turn(turn=f"t{attempt}", used=used - 1)
+            self.assertEqual(self.pre(turn=f"t{attempt}"), {})
+            self.goal_turn(turn=f"t{attempt}", used=used)
+            self.gate_arm(turn=f"t{attempt}")
+            for _ in range(3 + handoff.MAX_DENIALS):
+                self.pre("apply_patch", turn=f"t{attempt}")
+            last = self.pre("apply_patch", turn=f"t{attempt}")
+        self.assertIn("will not be tried again in this chat after 3 attempts", last["systemMessage"])
+        self.assertTrue((self.root / "session" / ".goal-wait").is_file())
+        self.goal_turn(turn="t4", used=90)
+        self.assertEqual(self.pre(turn="t4"), {})
+
+    def test_user_input_after_the_arm_settles_the_attempt_at_once(self):
+        self.active_goal_turn()
+        self.gate_arm()
+        self.append(steer("<hc from=\"t2\">done</hc>"))
+        result = self.pre("apply_patch")
+        self.assertNotIn("hookSpecificOutput", result)  # the user's request runs
+        self.assertIn("put off (user input arrived before the Goal was paused)", result["systemMessage"])
+        self.assertEqual(json.loads((self.root / "session" / ".goal-retry").read_text())["count"], 1)
+        self.assertFalse((self.root / "session" / ".goal-requested").exists())
+        self.assertFalse((self.root / "session" / ".goal-wait").exists())
+        # After the pause, input fails closed and says the Goal stays paused.
+        shutil.rmtree(self.root / "session")
+        self.set_goal()
+        self.active_goal_turn()
+        self.gate_arm()
+        self.gate_pause()
+        self.append(steer())
+        self.assertIn("Resume it with /goal", self.pre("apply_patch")["systemMessage"])
+        self.assertTrue((self.root / "session" / ".goal-wait").is_file())
+
+    def test_an_interrupted_turn_does_not_leave_an_orphan_arm(self):
+        self.active_goal_turn()
+        self.gate_arm()  # the user interrupts: no more tool calls and no Stop in this turn
+        self.goal_turn(turn="next", used=47)
+        self.assertTrue(denied(self.pre(turn="next")))
+        self.assertIn("put off", self.state.with_suffix(".closed").read_text())
+        self.assertTrue(handoff.store_for(self.root, "session", "next").is_file())
+
+    def test_compaction_releases_a_gate_that_has_not_paused(self):
+        self.active_goal_turn()
+        self.gate_arm()
+        self.append({"type": "compacted", "payload": {}})
+        self.assertEqual(self.pre("apply_patch"), {})
+        self.assertIn("compacted", self.state.with_suffix(".released").read_text())
+        self.assertFalse((self.root / "session" / ".goal-requested").exists())
+
+    def test_receiving_first_turns_transfer_again_without_looping(self):
+        # Destination 01a1d029: the receiving turn was .skip-ed and ran 82 minutes to 44% with no hooks.
+        self.transferred(budget=1_000_000)
+        budget, created, total = 141764, PAUSED_MS + 9000, 858236
+        source = "session"
+        for hop, (destination, base) in enumerate((("fresh", 45), ("fresh2", 30)), start=2):
+            self.deliver(destination=destination)
+            self.assertFalse((self.root / destination / "first.skip").exists())
+            meta = dict(self.meta, payload=dict(self.meta["payload"], id=destination, session_id=destination))
+            self.write_events(meta, event("task_started", turn_id="first"), event("token_count", info=usage(base)))
+            self.set_goal(thread=destination, tokens_used=0, token_budget=budget, created_at_ms=created)
+            with self.eligible():  # the first Stop: restore confirmed, no handoff at the base usage
+                self.assertEqual(handoff.stop_hook(self.payload(session_id=destination, turn_id="first"), self.root,
+                                                   "t1"), {})
+            self.assertTrue((self.root / destination / ".goal-restored").is_file())
+            # Past the threshold but within 10 points of a base that was already past it: no loop.
+            room = max(base, 40) + (10 if base > 40 else 1)
+            self.append(event("token_count", info=usage(room - 1)))
+            self.assertEqual(self.pre(session=destination, turn="first"), {}, destination)
+            self.append(event("token_count", info=usage(room)))
+            self.gate_arm(session=destination, turn="first")
+            self.gate_pause(used=40000, budget=budget, thread=destination, created=created, seconds=60)
+            answer = {"last_assistant_message": f"HANDOFF READY {self.nonce} GOAL transferred\n# Note\nmore"}
+            with patch.object(handoff.subprocess, "Popen") as launch, self.eligible():
+                handoff.stop_hook(self.payload(session_id=destination, turn_id="first", **answer), self.root, "t1")
+            launch.assert_called_once()
+            moved = json.loads(self.state.with_suffix(".goal.json").read_text())
+            total += 40000
+            self.assertEqual(moved["remaining"], budget - 40000)
+            self.assertEqual(moved["lineage"], {"root_session": source, "hops": hop, "total_tokens_used": total,
+                                                "total_time_used_seconds": 4597 + 60 * (hop - 1)})
+            budget, created = budget - 40000, created + 100_000
+            handoff.arm_guard(self.state, json.loads(self.state.read_text()))
+
+    def test_handoff_now_arms_this_turn_and_is_not_an_objection(self):
+        self.active_goal_turn()
+        payload = dict(self.payload(), prompt="  Handoff   NOW ")
+        with self.eligible():
+            result = handoff.manual_hook(payload, self.root, "t1")
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("the user asked to hand this chat off now", context)
+        self.state = handoff.store_for(self.root, "session", "turn")
+        record = json.loads(self.state.read_text())
+        self.nonce = record["nonce"]
+        self.assertEqual((record["origin"], record["prompt"]), ("manual", "Handoff NOW"))
+        self.assertIn(f"HANDOFF READY {self.nonce} GOAL transferred", context)
+        self.append(steer("Handoff NOW"), response(type="message", role="user", content=[
+            {"type": "input_text", "text": "Handoff NOW"}]))
+        self.assertEqual(self.pre("apply_patch"), {})  # the gate holds this turn too, with its allowance
+        self.gate_pause()
+        self.assertEqual(self.capture()[1].call_count, 1)
+        # Refusals are shown to the user and reach no model.
+        shutil.rmtree(self.root / "session")
+        self.set_goal()
+        self.revoke()
+        with self.eligible():
+            self.assertIn("Goal transfer is off", handoff.manual_hook(payload, self.root, "t1")["reason"])
+            self.control("handoff off")
+            self.assertIn("handoff is off", handoff.manual_hook(payload, self.root, "t1")["reason"])
+            self.control("handoff on")
+            self.set_goal(status="paused")  # paused before the request: left alone
+            context = handoff.manual_hook(payload, self.root, "t1")["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("with status paused. Do not change it", context)
+            self.assertIsNone(handoff.manual_hook(dict(payload, prompt="handoff now please"), self.root, "t1"))
+
+    def helper_chat(self, *rows, complete=False):
+        home = self.root / "home"
+        self.transcript = home / "sessions" / "2026" / "11" / "12" / "rollout-2026-11-12T00-00-00-session.jsonl"
+        self.transcript.parent.mkdir(parents=True, exist_ok=True)
+        meta = dict(self.meta, payload=dict(self.meta["payload"], cwd=str(self.root)))
+        self.write_events(meta, {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn",
+                          "turn_attribution": {"turn_trigger": "goal"}}}, *rows, event("token_count", info=usage(12)),
+                          *([event("task_complete", turn_id="turn")] if complete else []))
+        return {"CODEX_HOME": str(home), "CODEX_THREAD_ID": "session"}
+
+    def helper(self, env, record=True):
+        import io
+        if record:
+            (self.root / "session").mkdir(exist_ok=True)
+            (self.root / "session" / ".hook-script").write_text(handoff.hook_script_record(123))
+        out, err = io.StringIO(), io.StringIO()
+        with self.eligible(), patch.dict(os.environ, env), patch.object(handoff.sys, "stdout", out), (
+            patch.object(handoff.sys, "stderr", err)
+        ):
+            code = handoff.request_transfer(str(self.root))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_transfer_helper_arms_before_the_pause_the_user_asked_for(self):
+        self.set_goal(token_budget=1_000_000)
+        self.consent()
+        call = exec_call("h", 'text(await tools.exec_command({cmd:"codex context-handoff request-transfer"}));')
+        env = self.helper_chat(steer("Please pause the Goal and move it to a fresh chat."), call)
+        code, out, err = self.helper(env)
+        self.assertEqual(code, 0, err)
+        self.state = handoff.store_for(self.root, "session", "turn")
+        record = json.loads(self.state.read_text())
+        self.nonce = record["nonce"]
+        self.assertEqual((record["origin"], record["goal"]["mode"]), ("manual", "transfer"))
+        self.assertIn(f"HANDOFF READY {self.nonce} GOAL transferred", out)
+        self.assertIn("only call in its own tool call", out)
+        self.append(exec_output("h", out))  # the helper's own output lands after the arm
+        self.gate_pause(budget=1_000_000)
+        result, launch = self.capture()
+        launch.assert_called_once()
+        self.assertEqual(json.loads(self.state.with_suffix(".goal.json").read_text())["remaining"], 141764)
+        # A helper batched with an earlier Goal call in one script fails closed.
+        shutil.rmtree(self.root / "session")
+        self.set_goal(token_budget=1_000_000)
+        batch = exec_call("b", 'await tools.create_goal({objective:"x"});\\n'
+                          'text(await tools.exec_command({cmd:"codex context-handoff request-transfer"}));')
+        env = self.helper_chat(steer("move the goal"), batch)
+        self.assertEqual(self.helper(env)[0], 0)
+        self.nonce = json.loads(self.state.read_text())["nonce"]
+        self.append(exec_output("b", "armed"))
+        self.gate_pause(budget=1_000_000)
+        result, launch = self.capture()
+        launch.assert_not_called()
+        self.assertIn("exactly as requested", self.state.with_suffix(".closed").read_text())
+
+    def test_transfer_helper_refusals(self):
+        self.set_goal()
+        ask = steer("pause and transfer the goal")
+        cases = [
+            ({}, [ask], "CODEX_THREAD_ID is missing", {"CODEX_THREAD_ID": "", "CODEX_SESSION_ID": ""}),
+            ({}, [], "no user message in this turn", None),
+            ({}, [steer("Codex Context Handoff: x y z")], "no user message in this turn", None),
+            ({"complete": True}, [ask], "no turn is running", None),
+            ({}, [ask], "Goal transfer is off", None),
+        ]
+        for options, rows, words, env in cases:
+            with self.subTest(words):
+                base = self.helper_chat(*rows, **options)
+                code, out, err = self.helper({**base, **(env or {})})
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn(words, err)
+        self.consent()
+        self.control("handoff off")
+        self.assertIn("handoff is off", self.helper(self.helper_chat(ask))[2])
+        self.control("handoff on")
+        # A chat whose Codex process has not run these hooks (an older version) is refused.
+        code, out, err = self.helper(self.helper_chat(ask), record=False)
+        self.assertEqual(code, 0, err)  # the record from the previous call is still there
+        shutil.rmtree(self.root / "session")
+        for marker in (None, handoff.hook_script_record(999), handoff.hook_script_record(123).replace("hooks", "old")):
+            (self.root / "session").mkdir(exist_ok=True)
+            if marker:
+                (self.root / "session" / ".hook-script").write_text(marker)
+            code, out, err = self.helper(self.helper_chat(ask), record=False)
+            self.assertEqual((code, out), (2, ""), marker)
+            self.assertIn("has not run this version of the handoff hooks", err)
+            self.assertFalse(handoff.store_for(self.root, "session", "turn").exists())
+            shutil.rmtree(self.root / "session")
+        self.set_goal(status="paused")  # paused before the helper: a plain handoff that leaves it alone
+        code, out, _ = self.helper(self.helper_chat(ask))
+        self.assertEqual(code, 0)
+        self.assertIn("with status paused. Do not change it", out)
+        self.assertFalse(handoff.store_for(self.root, "session", "turn").with_suffix(".gate").exists())
+
     # --- the fresh chat ---
 
     def deliver(self, destination="fresh", turn="first"):
@@ -1166,7 +1557,8 @@ class GoalTransferTests(unittest.TestCase):
         self.assertEqual((restore["objective"], restore["remaining"]), (OBJECTIVE, 141764))
         lineage = json.loads((self.root / "fresh" / ".goal-lineage.json").read_text())
         self.assertEqual((lineage["hops"], lineage["total_tokens_used"]), (1, 858236))
-        self.assertTrue((self.root / "fresh" / "first.skip").is_file())
+        self.assertFalse((self.root / "fresh" / "first.skip").exists())
+        self.assertTrue((self.root / "fresh" / ".received-from").is_file())
 
     def test_mixed_goal_continuation_is_still_refused(self):
         self.transferred()
@@ -1228,9 +1620,8 @@ class GoalTransferTests(unittest.TestCase):
         self.fresh_stop()
         # The fresh chat's own Goal turn crosses the threshold and transfers again.
         hop = handoff.store_for(self.root, "fresh", "goal2")
-        self.write_events(dict(self.meta, payload=dict(self.meta["payload"], id="fresh", session_id="fresh")),
-                          {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "goal2",
-                           "turn_attribution": {"turn_trigger": "goal"}}}, event("token_count", info=usage(41)))
+        self.append({"type": "event_msg", "payload": {"type": "task_started", "turn_id": "goal2",
+                     "turn_attribution": {"turn_trigger": "goal"}}}, event("token_count", info=usage(41)))
         self.set_goal(thread="fresh", tokens_used=40000, token_budget=141764, created_at_ms=PAUSED_MS + 9000,
                       time_used_seconds=60)
         with self.eligible():
@@ -1397,13 +1788,15 @@ class GoalTransferTests(unittest.TestCase):
                               capture_output=True, text=True, timeout=20, check=True)
         self.assertEqual(json.loads(done.stdout.splitlines()[0]), {})
         self.assertEqual(state.with_suffix(".received").read_text(), "fresh\n")
-        self.assertTrue((canonical / "fresh" / "first.skip").is_file())
+        self.assertTrue((canonical / "fresh" / ".received-from").is_file())
 
 
 FAKE_CODEX = """import json, os, sys
 with open(os.environ["RECORD"], "w") as out:
-    json.dump({"argv": sys.argv[1:], "optin": os.environ.get("CODEX_CONTEXT_HANDOFF")}, out)
+    json.dump({"argv": sys.argv[1:], "optin": os.environ.get("CODEX_CONTEXT_HANDOFF"),
+               "force": os.environ.get("CODEX_HERDR_FULL_ACCESS")}, out)
 """
+BYPASS = "--dangerously-bypass-approvals-and-sandbox"
 
 
 class LauncherTests(unittest.TestCase):
@@ -1411,6 +1804,7 @@ class LauncherTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         base = Path(folder.name)
+        self.base = base
         self.shim_dir, self.copy_dir, self.real_dir = base / "shim", base / "copy", base / "real"
         for path in (self.shim_dir, self.copy_dir, self.real_dir):
             path.mkdir()
@@ -1421,37 +1815,54 @@ class LauncherTests(unittest.TestCase):
         real.chmod(0o755)
         self.record = base / "record.json"
 
-    def launch(self, *args, **env):
+    def run_shim(self, *args, **env):
         environment = {
             "PATH": os.pathsep.join(map(str, (self.shim_dir, self.copy_dir, self.real_dir))),
             "RECORD": str(self.record), "HC_TERMINAL_ID": "t1", **env,
         }
-        subprocess.run([sys.executable, str(self.shim_dir / "codex"), *args], env=environment, check=True, timeout=20)
-        return json.loads(self.record.read_text())
+        # The copy, as installed in ~/.local/bin, runs on its own.
+        return subprocess.run([sys.executable, str(self.copy_dir / "codex"), *args], env=environment,
+                              capture_output=True, text=True, timeout=20)
 
-    def test_interactive_launches_get_no_daemon_and_opt_in(self):
+    def launch(self, *args, **env):
+        self.run_shim(*args, **env).check_returncode()
+        result = json.loads(self.record.read_text())
+        self.record.unlink()
+        return {key: value for key, value in result.items() if key != "force" or value is not None}
+
+    def test_interactive_launches_get_full_access_no_daemon_and_opt_in(self):
         cases = [
-            ((), ["--no-daemon"]),
-            (("-m", "gpt-x", "-p", "work", "-s", "workspace-write", "fix it"),
-             ["--no-daemon", "-m", "gpt-x", "-p", "work", "-s", "workspace-write", "fix it"]),
-            (("-c", "model=\"o3\"", "resume", "--last"), ["-c", "model=\"o3\"", "resume", "--no-daemon", "--last"]),
-            (("fork", "abc"), ["fork", "--no-daemon", "abc"]),
-            (("-i", "a.png", "b.png", "describe"), ["--no-daemon", "-i", "a.png", "b.png", "describe"]),
-            (("--", "exec"), ["--no-daemon", "--", "exec"]),
-            (("--", "--help"), ["--no-daemon", "--", "--help"]),
-            (("fix", "--no-daemon"), ["fix", "--no-daemon"]),
+            ((), [BYPASS, "--no-daemon"]),
+            (("-m", "gpt-x", "fix it"), [BYPASS, "--no-daemon", "-m", "gpt-x", "fix it"]),
+            (("-c", "model=\"o3\"", "resume", "--last"), ["-c", "model=\"o3\"", "resume", BYPASS, "--no-daemon", "--last"]),
+            (("fork", "abc"), ["fork", BYPASS, "--no-daemon", "abc"]),
+            (("-i", "a.png", "b.png", "describe"), [BYPASS, "--no-daemon", "-i", "a.png", "b.png", "describe"]),
+            (("--", "exec"), [BYPASS, "--no-daemon", "--", "exec"]),
+            (("--", "--help"), [BYPASS, "--no-daemon", "--", "--help"]),
+            (("fix", "--no-daemon"), [BYPASS, "fix", "--no-daemon"]),
         ]
         for args, expected in cases:
             self.assertEqual(self.launch(*args), {"argv": expected, "optin": "1"}, args)
 
+    def test_an_explicit_permission_choice_wins_over_full_access(self):
+        for args in (
+            ("-p", "work", "fix"), ("-s", "workspace-write"), ("-sread-only",), ("-a", "never"), ("--approve-for-me",),
+            ("-c", "sandbox_mode=\"read-only\""), ("--config=approval_policy=never",), ("-cpermissions.net=1",),
+            ("--profile=x",), ("--yolo",), (BYPASS,), ("-c", "approvals_reviewer=x"), ("-c", "default_permissions=y"),
+        ):
+            self.assertEqual(self.launch(*args), {"argv": ["--no-daemon", *args], "optin": "1"}, args)
+        self.assertEqual(self.launch("resume", "-s", "read-only", "x"),
+                         {"argv": ["resume", "--no-daemon", "-s", "read-only", "x"], "optin": "1"})
+        # Other -c keys are not permission choices.
+        self.assertEqual(self.launch("-c", "model=o3"), {"argv": [BYPASS, "--no-daemon", "-c", "model=o3"], "optin": "1"})
+
     def test_explicit_no_daemon_is_not_duplicated(self):
-        self.assertEqual(self.launch("--no-daemon"), {"argv": ["--no-daemon"], "optin": "1"})
-        self.assertEqual(self.launch("resume", "--no-daemon", "x"), {"argv": ["resume", "--no-daemon", "x"], "optin": "1"})
+        self.assertEqual(self.launch("--no-daemon"), {"argv": [BYPASS, "--no-daemon"], "optin": "1"})
+        self.assertEqual(self.launch("resume", "--no-daemon", "x"),
+                         {"argv": ["resume", BYPASS, "--no-daemon", "x"], "optin": "1"})
         # A top-level flag is kept and resume/fork still gets its own (clap accepts one per scope).
-        self.assertEqual(
-            self.launch("--no-daemon", "resume", "x"),
-            {"argv": ["--no-daemon", "resume", "--no-daemon", "x"], "optin": "1"},
-        )
+        self.assertEqual(self.launch("--no-daemon", "resume", "x"),
+                         {"argv": ["--no-daemon", "resume", BYPASS, "--no-daemon", "x"], "optin": "1"})
 
     def test_other_modes_pass_through(self):
         for args in (
@@ -1462,9 +1873,75 @@ class LauncherTests(unittest.TestCase):
         ):
             self.assertEqual(self.launch(*args), {"argv": list(args), "optin": None}, args)
 
-    def test_opt_out_and_outside_herdr_pass_through(self):
-        self.assertEqual(self.launch("resume", CODEX_CONTEXT_HANDOFF="0"), {"argv": ["resume"], "optin": "0"})
+    def test_opt_out_keeps_full_access_and_outside_herdr_passes_through(self):
+        self.assertEqual(self.launch("resume", CODEX_CONTEXT_HANDOFF="0"),
+                         {"argv": ["resume", BYPASS, "--no-daemon"], "optin": "0"})
         self.assertEqual(self.launch("fix", HC_TERMINAL_ID=""), {"argv": ["fix"], "optin": None})
+        # codex-herdr forces the same rules outside Herdr; the variable never reaches codex.
+        self.assertEqual(self.launch("fix", HC_TERMINAL_ID="", CODEX_HERDR_FULL_ACCESS="force"),
+                         {"argv": [BYPASS, "--no-daemon", "fix"], "optin": "1"})
+        self.assertEqual(self.launch("exec", "x", HC_TERMINAL_ID="", CODEX_HERDR_FULL_ACCESS="force"),
+                         {"argv": ["exec", "x"], "optin": None})
+
+    def helper_home(self, session="chat1"):
+        home = self.base / "codex-home"
+        data = home / "plugins" / "data"
+        root = data / "codex-context-handoff-x"
+        (root / session).mkdir(parents=True)
+        (root / session / ".prompt-hook").write_text("123\n")
+        hooks = self.base / "plugin" / "hooks"
+        hooks.mkdir(parents=True)
+        script = hooks / "context_handoff.py"
+        script.write_text("import json, os, sys\njson.dump(sys.argv[1:], open(os.environ['RECORD'], 'w'))\n")
+        # Written by the 0.4.0 UserPromptSubmit hook for this chat: its script and the chat's Codex pid
+        # (this test process stands in for it: the helper runs below it).
+        (root / session / ".hook-script").write_text(f"{script}\n{os.getpid()}\n")
+        (data / "codex-context-handoff-alias").symlink_to(root)  # another install sharing the data
+        return home, root
+
+    def test_transfer_helper_runs_the_recorded_hook_script_for_this_chat(self):
+        home, root = self.helper_home()
+        for variable in ("CODEX_THREAD_ID", "CODEX_SESSION_ID"):
+            done = self.run_shim("context-handoff", "request-transfer", CODEX_HOME=str(home), **{variable: "chat1"})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(json.loads(self.record.read_text()), ["--request-transfer", str(root.resolve())])
+            self.record.unlink()
+        refusals = [
+            ({}, "CODEX_THREAD_ID"),
+            ({"CODEX_THREAD_ID": "other"}, "found 0"),
+            ({"CODEX_THREAD_ID": "../x"}, "CODEX_THREAD_ID"),
+        ]
+        for env, words in refusals:
+            done = self.run_shim("context-handoff", "request-transfer", CODEX_HOME=str(home), **env)
+            self.assertEqual(done.returncode, 2, env)
+            self.assertIn(words, done.stderr)
+            self.assertFalse(self.record.exists())
+        second = home / "plugins" / "data" / "other-install" / "chat1"
+        second.mkdir(parents=True)
+        (second / ".hook-script").write_text((root / "chat1" / ".hook-script").read_text())
+        done = self.run_shim("context-handoff", "request-transfer", CODEX_HOME=str(home), CODEX_THREAD_ID="chat1")
+        self.assertEqual((done.returncode, "found 2" in done.stderr), (2, True))
+        shutil.rmtree(second.parent)
+        record = (root / "chat1" / ".hook-script").read_text()
+        for bad in ("/tmp/evil.py\n1\n", record.replace(str(os.getpid()), "999999"), record.split("\n")[0]):
+            (root / "chat1" / ".hook-script").write_text(bad)
+            done = self.run_shim("context-handoff", "request-transfer", CODEX_HOME=str(home), CODEX_THREAD_ID="chat1")
+            self.assertEqual(done.returncode, 2, bad)
+            self.assertIn("not recorded by its running Codex process", done.stderr)
+            self.assertFalse(self.record.exists())
+
+    def test_transfer_helper_refuses_a_chat_whose_process_runs_older_hooks(self):
+        # Deployment: a 0.3.0 chat (only .prompt-hook) sharing data with 0.4.0 chats, and a stray
+        # data-wide record, must be refused before its Goal is touched, never run with another chat's record.
+        home, root = self.helper_home()
+        (root / "old").mkdir()
+        (root / "old" / ".prompt-hook").write_text(f"{os.getpid()}\n")
+        (root / ".hook-script").write_text((root / "chat1" / ".hook-script").read_text())
+        done = self.run_shim("context-handoff", "request-transfer", CODEX_HOME=str(home), CODEX_THREAD_ID="old")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("found 0", done.stderr)
+        self.assertIn("continue in a new chat", done.stderr)
+        self.assertFalse(self.record.exists())
 
 
 if __name__ == "__main__":
