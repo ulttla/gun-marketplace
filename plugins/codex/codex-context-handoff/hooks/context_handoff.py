@@ -30,7 +30,8 @@ SETTLE = 2.0  # seconds the fresh chat must stay idle with an empty prompt befor
 NOW = {"handoff now", "핸드오프 지금"}
 GOAL_TOOLS = {"get_goal", "update_goal", "create_goal"}
 CODE_MODE = "exec"  # code mode's script tool; each nested tool call gets its own PreToolUse
-MAX_ATTEMPTS = 3  # Goal transfer attempts per chat that user input may put off
+MAX_ATTEMPTS = 3  # Goal transfer (or tool-boundary handoff) attempts per chat that user input may put off
+PLAIN_RETRY = ".handoff-retry"  # put-off tool-boundary handoffs of a chat without an active Goal
 RETRY_GROWTH = 5.0  # percentage points of context a put-off attempt waits for before trying again
 MAX_DENIALS = 12  # denied tool calls before the gate gives up for the turn
 CONTROLS = {
@@ -910,7 +911,11 @@ def transfer_blocked(folder, used):
         return "waiting"
     if (folder / ".goal-requested").exists():
         return "requested"
-    retry = folder / ".goal-retry"
+    return retry_blocked(folder / ".goal-retry", used)
+
+
+def retry_blocked(retry, used):
+    """Why a put-off attempt may not be armed again yet (attempts used up, or too little growth), or None."""
     if retry.exists():
         data = read_json(retry)
         if not data or type(data.get("count")) is not int or data["count"] >= MAX_ATTEMPTS:
@@ -967,22 +972,30 @@ def mid_turn_request(record, lead):
     return f"Codex Context Handoff: {lead}\n" + handoff_request(record["nonce"]) + goal_request(goal, record["nonce"])
 
 
-def gate_lead(checkpoint):
+def checkpoint_text(checkpoint):
     return (
-        "this tool call was not run. The context threshold was crossed while a Goal is active, so the Goal "
-        "moves to a fresh chat now. " + (
-            f"You may make at most {checkpoint} more tool call(s), only to reach a safe checkpoint (finish a "
-            "half-applied edit, note running workers); start no new work. " if checkpoint else "Start no new work. "
-        ) + "Other tool calls are denied until this turn ends."
+        f"You may make at most {checkpoint} more tool call(s), only to reach a safe checkpoint (finish a "
+        "half-applied edit, note running workers); start no new work. " if checkpoint else "Start no new work. "
+    )
+
+
+def gate_lead(checkpoint, transfer=True):
+    return (
+        "this tool call was not run. " + (
+            "The context threshold was crossed while a Goal is active, so the Goal moves to a fresh chat now. "
+            if transfer else "The context threshold was crossed, so this chat continues in a fresh chat now. "
+        ) + checkpoint_text(checkpoint) + "Other tool calls are denied until this turn ends."
     )
 
 
 def manual_lead(record):
-    return (
-        "the user asked to hand this chat off now. " + (
-            "Until this turn ends, tool calls other than the Goal steps below are limited to reaching a safe "
-            "checkpoint." if goal_moves(record) else ""
+    if goal_moves(record):
+        return (
+            "the user asked to hand this chat off now. Until this turn ends, tool calls other than the Goal steps "
+            "below are limited to reaching a safe checkpoint."
         )
+    return "the user asked to hand this chat off now. " + checkpoint_text(checkpoint_calls()) + (
+        "Other tool calls are denied until this turn ends."
     )
 
 
@@ -1013,23 +1026,42 @@ def deny(text):
     }}
 
 
+def new_gate(state, record):
+    """Start holding a mid-turn armed turn: `checkpoint` tool calls, and for a handoff without a Goal
+    transfer also `scripts` code-mode `exec` wrappers (their nested calls take the checkpoint calls)."""
+    budget = checkpoint_calls()
+    gate = {"checkpoint": budget, "denied": 0, "updated": None}
+    if not goal_moves(record):
+        gate["scripts"] = budget
+    replace_private(state.with_suffix(".gate"), json.dumps(gate))
+    return budget
+
+
 def gate_hook(payload, root, terminal):
-    """PreToolUse: arm a Goal transfer at a tool boundary and hold the turn to it until the turn ends."""
+    """PreToolUse: arm a handoff at a tool boundary and hold the turn to it until the turn ends.
+
+    A chat with an active Goal arms a Goal transfer (consent needed); a chat with no Goal arms an
+    ordinary handoff (no consent, no Goal tool). A chat whose Goal is not active is left to Stop.
+    """
     session, turn = ids(payload)
     transcript = payload.get("transcript_path")
     if not session or not transcript or not payload.get("cwd") or disabled(root, session, turn):
         return {}
     folder, state = root / session, store_for(root, session, turn)
     if state.is_file():
+        # One record per turn: once it is released or done, this turn is never armed again.
         record = json.loads(state.read_text(encoding="utf-8"))
-        if not goal_moves(record) or record.get("origin") not in {"tool", "manual"} or any(
+        if record.get("origin") not in {"tool", "manual"} or any(
             state.with_suffix(suffix).exists() for suffix in (".md", ".released", *DONE)
         ):
             return {}
+        gate = state.with_suffix(".gate")
+        if not goal_moves(record) and not gate.is_file():
+            return {}  # armed by an older version that did not hold ordinary handoffs
         with open_lock(state.with_suffix(".gate-lock")):
             return gate_decision(payload, state, record)
     name = tool_name(payload)
-    if name in GOAL_TOOLS or not goal_consent(root) or (folder / ".off").exists():
+    if name in GOAL_TOOLS or (folder / ".off").exists():
         return {}
     latest = recent_turn(transcript)
     limit = threshold()
@@ -1038,24 +1070,30 @@ def gate_hook(payload, root, terminal):
     used = usage_percent(latest["usage"])
     notice = settle_orphans(folder, turn)
     shown = {"systemMessage": notice} if notice else {}
-    if transfer_blocked(folder, used) or pending(folder) or not confirm_restore(folder, transcript, session):
+    if pending(folder) or not confirm_restore(folder, transcript, session):
         return shown
     status, row = goal_state(transcript, session, latest.get("trigger"))
-    if status != "row" or row["status"] != "active" or (
-        row["token_budget"] is not None and row["token_budget"] - row["tokens_used"] <= 0
-    ):
-        return shown  # the Stop hook reports unknown state and exhausted budgets once
+    if status == "none":
+        if retry_blocked(folder / PLAIN_RETRY, used):
+            return shown
+        goal = None
+    elif status != "row" or row["status"] != "active":
+        return shown  # unknown state is reported by Stop once; a Goal that is not active is left to Stop
+    else:
+        consent = goal_consent(root)
+        if not consent or transfer_blocked(folder, used) or (
+            row["token_budget"] is not None and row["token_budget"] - row["tokens_used"] <= 0
+        ):
+            return shown  # the Stop hook reports a missing consent and exhausted budgets once
+        goal = {"mode": "transfer", "since": consent["since"], "arm": row}
     info, _ = check_chat(payload, terminal)
-    consent = goal_consent(root)
-    if not info or not consent:
+    if not info or (goal and not goal_consent(root)):
         return shown
-    record = arm_record(payload, root, terminal, info, {"mode": "transfer", "since": consent["since"], "arm": row},
-                        "tool", used)
+    record = arm_record(payload, root, terminal, info, goal, "tool", used)
     if not record:
         return shown
-    budget = checkpoint_calls()
-    replace_private(state.with_suffix(".gate"), json.dumps({"checkpoint": budget, "denied": 0, "updated": None}))
-    return dict(deny(mid_turn_request(record, gate_lead(budget))), **shown)
+    budget = new_gate(state, record)
+    return dict(deny(mid_turn_request(record, gate_lead(budget, goal_moves(record)))), **shown)
 
 
 class open_lock:
@@ -1096,21 +1134,21 @@ def gate_decision(payload, state, record):
     if rows is None or user_input(rows, record.get("prompt")):
         # The user (or a worker message) spoke after the arm: their request wins. Settle the attempt now,
         # since an interrupted turn may never reach Stop.
-        return settle(state, record, "user input arrived before the Goal was paused")
+        return settle(state, record, "user input arrived before the Goal was paused" if goal_moves(record)
+                      else "user input arrived after the handoff was armed")
+    if not goal_moves(record):
+        return plain_gate_decision(payload, state, record, gate)
     name = tool_name(payload)
     status, row = goal_state(record["transcript"], record["session"])
     unreadable = status == "unknown"
     locked = bool(gate.get("updated")) or (status == "row" and (
         row["goal_id"] != record["goal"]["arm"]["goal_id"] or row["status"] != "active"
     )) or status == "none"
-    if not locked and not unreadable and record.get("origin") == "tool":
-        latest = recent_turn(record["transcript"])
-        limit = threshold()
-        if latest and latest["id"] == record["turn"] and (limit is None or not exceeds_threshold(latest["usage"], limit)):
-            # Auto-compaction already made room: stop holding the turn and try again later if needed.
-            new_private_file(state.with_suffix(".released"), "context was compacted below the threshold\n")
-            put_off(state, record, "the context was compacted below the threshold")
-            return {}
+    if not locked and not unreadable and compacted(record):
+        # Auto-compaction already made room: stop holding the turn and try again later if needed.
+        new_private_file(state.with_suffix(".released"), "context was compacted below the threshold\n")
+        put_off(state, record, "the context was compacted below the threshold")
+        return {}
     allowed, why = False, "this tool call was denied while the Goal transfer is armed."
     if name == "get_goal" or (name == CODE_MODE and not locked):
         allowed = True  # after the pause even a script is not needed: only the final answer is
@@ -1140,11 +1178,98 @@ def gate_decision(payload, state, record):
     return result
 
 
-def settle(state, record, why):
-    """End an armed transfer that will not complete in this turn, at once: put off while the Goal is
-    untouched, otherwise fail closed (the Goal stays paused). Returns the hook output."""
+def compacted(record):
+    """Whether a turn armed by the gate itself is back under the threshold (auto-compaction made room)."""
+    if record.get("origin") != "tool":
+        return False  # an explicit request stands whatever the context use
+    latest = recent_turn(record["transcript"])
+    limit = threshold()
+    return bool(latest) and latest["id"] == record["turn"] and (
+        limit is None or not exceeds_threshold(latest["usage"], limit)
+    )
+
+
+def plain_reminder(record, why):
+    return (
+        f"Codex Context Handoff: {why} End the turn now: start your final answer with HANDOFF READY "
+        f"{record['nonce']}, then the handoff note. If everything is complete, or the remaining work needs the "
+        "user or an approval, respond normally without the marker." + (
+            " Do not change the Goal in this chat." if record.get("goal") else ""
+        )
+    )
+
+
+def plain_gate_decision(payload, state, record, gate):
+    """Hold a handoff without a Goal transfer to a bounded checkpoint until the turn ends.
+
+    Every tool call other than code mode's `exec` takes one checkpoint call, including each call nested
+    in a script. Each `exec` wrapper takes one script, and runs only while a checkpoint call is left, so
+    a script with no nested call is bounded too. No Goal tool runs here (the handoff needs none), and a
+    Goal that appears after an arm without one (or a Goal state that can no longer be read) releases the
+    handoff at once, so no Goal is left behind or touched.
+    """
+    why = goal_changed(record)
+    if why:
+        return release(state, record, why)
+    if compacted(record):
+        return release(state, record, "the context was compacted below the threshold")
+    name = tool_name(payload)
+    allowed, why = False, "this tool call was denied while the handoff is armed."
+    if name in GOAL_TOOLS:
+        why = f"{name} is not part of this handoff; no Goal tool may run while this chat hands off."
+    elif gate.get("checkpoint", 0) <= 0:
+        why = "the safe-checkpoint allowance is used up."
+    elif name == CODE_MODE:
+        if gate.get("scripts", 0) > 0:
+            allowed, gate["scripts"] = True, gate["scripts"] - 1
+        else:
+            why = "no more scripts may run while this chat hands off."
+    else:
+        allowed, gate["checkpoint"] = True, gate["checkpoint"] - 1
+    if not allowed:
+        gate["denied"] = gate.get("denied", 0) + 1
+    replace_private(state.with_suffix(".gate"), json.dumps(gate))
+    if allowed:
+        return {}
+    if gate["denied"] > MAX_DENIALS:
+        return give_up(state, record, gate)
+    return deny(plain_reminder(record, why))
+
+
+def goal_changed(record):
+    """Why a handoff without a Goal transfer may not go on because of the Goal DB, or None.
+
+    Armed with no Goal: any Goal now (or an unreadable state) would be left behind by the switch.
+    Armed leaving a Goal that was not active: that Goal must still be exactly as it was.
+    """
+    if goal_moves(record):
+        return None
+    status, row = goal_state(record["transcript"], record["session"])
+    if status == "unknown":
+        return f"the Goal state could not be read ({row})"
+    goal = record.get("goal")
+    if not goal:
+        return f"a Goal ({row['status']}) appeared in this chat after the handoff was armed" if status == "row" else None
+    arm = goal["arm"]
+    if status != "row" or any(row[key] != arm.get(key) for key in (
+        "goal_id", "status", "created_at_ms", "updated_at_ms", "objective_sha256",
+    )):
+        return "the Goal in this chat changed after the handoff was armed"
+    return None
+
+
+def release(state, record, why):
+    """Stop holding the turn now and put the attempt off; the Goal, if any, is never touched."""
     new_private_file(state.with_suffix(".released"), why + "\n")
-    if untouched(state, record):
+    result = put_off(state, record, why)
+    return {"systemMessage": result["systemMessage"]} if result.get("systemMessage") else {}
+
+
+def settle(state, record, why):
+    """End an armed handoff that will not complete in this turn, at once: put off while no Goal was
+    paused for it, otherwise fail closed (the Goal stays paused). Returns the hook output."""
+    new_private_file(state.with_suffix(".released"), why + "\n")
+    if not goal_moves(record) or untouched(state, record):
         result = put_off(state, record, why)
     else:
         result = goal_failure(state, record, why)
@@ -1165,7 +1290,8 @@ def settle_orphans(folder, turn):
         except (OSError, ValueError):
             new_private_file(state.with_suffix(".closed"), "unreadable handoff record\n")
             continue
-        if goal_moves(record):
+        if goal_moves(record) or record.get("origin") in {"tool", "manual"}:
+            # A held turn that ended without its note (an interrupt) counts as a put-off attempt.
             messages.append(settle(state, record, "the turn ended without a handoff note").get("systemMessage"))
         else:
             new_private_file(state.with_suffix(".closed"), "the turn ended without a handoff note\n")
@@ -1175,16 +1301,39 @@ def settle_orphans(folder, turn):
 def give_up(state, record, gate):
     """The model kept working through MAX_DENIALS denials: stop holding the turn, visibly."""
     new_private_file(state.with_suffix(".released"), f"gave up after {MAX_DENIALS} denied tool calls\n")
+    why = f"the model kept calling tools after {MAX_DENIALS} denials"
+    if not goal_moves(record):
+        return {"systemMessage": put_off(state, record, why)["systemMessage"]}
     status, row = goal_state(record["transcript"], record["session"])
     if status != "row" or row["status"] != "active" or row["goal_id"] != record["goal"]["arm"]["goal_id"]:
-        result = goal_failure(state, record, f"the model kept calling tools after {MAX_DENIALS} denials")
+        result = goal_failure(state, record, why)
     else:
-        result = put_off(state, record, f"the model kept calling tools after {MAX_DENIALS} denials")
+        result = put_off(state, record, why)
     return {"systemMessage": result.get("systemMessage", "")}
+
+
+def plain_put_off(state, record, why):
+    """End a handoff attempt without a Goal transfer; the gate may arm a later turn after more context use."""
+    folder = state.parent
+    count = ((read_json(folder / PLAIN_RETRY) or {}).get("count") or 0) + 1
+    new_private_file(state.with_suffix(".closed"), f"handoff put off: {why}\n")
+    replace_private(folder / PLAIN_RETRY, json.dumps({"count": count, "usage": record.get("usage") or 0}))
+    if count >= MAX_ATTEMPTS:
+        return {"systemMessage": (
+            f"Context handoff: the handoff was put off ({why}); work continues here. Tool calls are no longer held "
+            f"for a handoff in this chat after {count} attempts; a later turn past the threshold still asks for "
+            "one when it ends."
+        )}
+    return {"systemMessage": (
+        f"Context handoff: the handoff was put off ({why}); work continues here. A later turn asks again when it "
+        f"ends, or at a tool call after {RETRY_GROWTH:g} more percentage points of context use."
+    )}
 
 
 def put_off(state, record, why):
     """End this transfer attempt with the Goal still active and untouched; a later one may try again."""
+    if not goal_moves(record):
+        return plain_put_off(state, record, why)
     folder = state.parent
     count = ((read_json(folder / ".goal-retry") or {}).get("count") or 0) + 1
     new_private_file(state.with_suffix(".closed"), f"goal transfer put off: {why}\n")
@@ -1202,10 +1351,15 @@ def put_off(state, record, why):
     )}
 
 
+def user_spoke(record):
+    """Whether a prompt, steer or worker message arrived after the arm (the arming prompt excepted)."""
+    rows = armed_rows(record)
+    return rows is not None and user_input(rows, record.get("prompt"))
+
+
 def user_put_off(state, record):
     """The user spoke after the arm and the Goal was never touched: put the attempt off, not fail it."""
-    rows = armed_rows(record)
-    return rows is not None and user_input(rows, record.get("prompt")) and untouched(state, record)
+    return user_spoke(record) and untouched(state, record)
 
 
 def untouched(state, record):
@@ -1268,10 +1422,7 @@ def arm_now(payload, root, terminal, prompt=None):
     record = arm_record(payload, root, terminal, info, goal, "manual", usage_percent(last_usage(transcript)), prompt)
     if not record:
         return None, "this turn already has a handoff"
-    if goal_moves(record):
-        state = store_for(root, session, turn)
-        replace_private(state.with_suffix(".gate"), json.dumps({"checkpoint": checkpoint_calls(), "denied": 0,
-                                                                "updated": None}))
+    new_gate(store_for(root, session, turn), record)  # the turn is held to the request until it ends
     return record, None
 
 
@@ -1365,7 +1516,8 @@ def request_transfer(root):
                            "tool call; this helper must have been the only call in its own tool call, or the transfer "
                            "fails closed. " + (
         "Until this turn ends, tool calls other than the Goal steps below are limited to reaching a safe "
-        "checkpoint." if goal_moves(record) else ""
+        "checkpoint." if goal_moves(record) else checkpoint_text(checkpoint_calls())
+        + "Other tool calls are denied until this turn ends."
     )))
     return 0
 
@@ -1430,13 +1582,19 @@ def capture(payload, state):
     answer = (payload.get("last_assistant_message") or "").strip()
     marker, _, body = answer.partition("\n")
     base = f"HANDOFF READY {record['nonce']}"
+    mid_turn = record.get("origin") in {"tool", "manual"}
     # The GOAL suffix is informative only; the transfer is proven from the rollout and the DB.
     if marker.rstrip() not in {base, f"{base} GOAL transferred", f"{base} GOAL left"} or not (
         0 < len(body.strip()) <= MAX_NOTE
     ):
-        mid_turn = record.get("origin") in {"tool", "manual"}
         if transfer and user_put_off(state, record):
             return put_off(state, record, "user input arrived before the Goal was paused")
+        if mid_turn and not transfer and user_spoke(record):
+            # Never ask again over the user's (or a worker's) later message.
+            return put_off(state, record, "user input arrived after the handoff was armed")
+        changed = goal_changed(record) if mid_turn else None
+        if changed:
+            return put_off(state, record, changed)  # never ask again for a handoff that may not switch
         if mid_turn and not record.get("stop_requested"):
             # Armed mid-turn: the turn ended without the note, so ask once more here, with the same nonce.
             record["stop_requested"] = True
@@ -1447,6 +1605,9 @@ def capture(payload, state):
         new_private_file(state.with_suffix(".closed"), "no handoff note\n")
         return {}
     note = body.strip() + "\n"
+    if mid_turn and not transfer and user_spoke(record):
+        # A message after a mid-turn arm cancels it even when the model still wrote the note.
+        return put_off(state, record, "user input arrived after the handoff was armed")
     if transfer:
         # Consent can be withdrawn while the turn runs (a blocked control or another terminal).
         moved, why = (None, "Goal transfer was turned off") if not goal_consent(state.parent.parent) else (
@@ -1467,6 +1628,16 @@ def capture(payload, state):
             return {"systemMessage": (
                 f"Context handoff stopped: the Goal in this chat changed during the handoff turn ({why}), so "
                 "nothing was handed off. Work continues here."
+            )}
+    else:
+        # Armed with no Goal (at Stop or mid-turn, even a turn whose last step was only the final answer):
+        # a Goal that appeared since would be left behind in this chat by the switch.
+        why = goal_changed(record)
+        if why:
+            new_private_file(state.with_suffix(".closed"), f"goal check failed: {why}\n")
+            return {"systemMessage": (
+                f"Context handoff stopped: {why}, so nothing was handed off and no Goal was touched. Work "
+                "continues here."
             )}
     if not new_private_file(state.with_suffix(".md"), note):
         return {}
@@ -1504,8 +1675,11 @@ def tool_hook(payload, root, terminal):
     if latest.get("trigger") == "goal":
         return {}  # Goal turns chain without a user; the PreToolUse gate arms their transfer instead
     text = nudge(limit)
+    # The chat is checked before the once-per-turn marker, so a failed check does not use up the nudge.
+    if not check_chat(payload, terminal)[0]:
+        return {}
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if not new_private_file(marker, "") or not check_chat(payload, terminal)[0]:
+    if not new_private_file(marker, ""):
         return {}
     return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": text}}
 
@@ -1840,6 +2014,9 @@ def fresh_chat_problem(view, state, record, old_screen, cleared_turn, echo, cach
         return "The takeover guard for this terminal is missing"
     if consent_revoked(state):
         return consent_revoked(state)
+    changed = goal_changed(record)
+    if changed:
+        return f"Stopped: {changed}"
     if source_moved(record, cache):
         return "The old chat started another turn"
     if view is None:
@@ -1928,6 +2105,9 @@ def hold_for_cancel(record, state, screen, seconds, turn):
             raise RuntimeError("Handoff was cancelled before /clear.")
         if consent_revoked(state):
             raise RuntimeError(f"{consent_revoked(state)} before /clear.")
+        changed = goal_changed(record)
+        if changed:
+            raise RuntimeError(f"Stopped before /clear: {changed}.")
         info = terminal_info(record["terminal"], record["cwd"], record["pid"])
         if (
             not info or active_status(info) not in {"done", "idle"} or info.get("turn") != turn

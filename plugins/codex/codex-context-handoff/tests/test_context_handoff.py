@@ -267,7 +267,8 @@ class ContextHandoffTests(unittest.TestCase):
     def test_user_input_during_grace_fails_closed(self):
         state = handoff.store_for(self.root, "session", "turn")
         state.parent.mkdir()
-        record = {"terminal": "t1", "cwd": str(self.root), "pid": 1}
+        record = {"terminal": "t1", "cwd": str(self.root), "pid": 1, "session": "session",
+                  "transcript": str(self.transcript)}
         info = {"status": {"app": "codex", "state": "idle"}, "turn": 3}
         with patch.object(handoff, "terminal_info", return_value=info), (
             patch.object(handoff, "read_composer", side_effect=["› ", None])
@@ -279,7 +280,8 @@ class ContextHandoffTests(unittest.TestCase):
         # A busy period that began and ended between two polls still moves Herdr's turn.
         state = handoff.store_for(self.root, "session", "turn")
         state.parent.mkdir()
-        record = {"terminal": "t1", "cwd": str(self.root), "pid": 1}
+        record = {"terminal": "t1", "cwd": str(self.root), "pid": 1, "session": "session",
+                  "transcript": str(self.transcript)}
         infos = [{"status": {"app": "codex", "state": "idle"}, "turn": t} for t in (3, 3, 4)]
         with patch.object(handoff, "terminal_info", side_effect=infos), (
             patch.object(handoff, "read_composer", return_value="› ")
@@ -1599,7 +1601,314 @@ class GoalTransferTests(unittest.TestCase):
         code, out, _ = self.helper(self.helper_chat(ask))
         self.assertEqual(code, 0)
         self.assertIn("with status paused. Do not change it", out)
-        self.assertFalse(handoff.store_for(self.root, "session", "turn").with_suffix(".gate").exists())
+        self.assertIn("at most 3 more tool call(s)", out)  # 0.5.0: an ordinary handoff holds the turn too
+        gate = json.loads(handoff.store_for(self.root, "session", "turn").with_suffix(".gate").read_text())
+        self.assertEqual((gate["checkpoint"], gate["scripts"]), (3, 3))
+
+    # --- 0.5.0: the gate also holds an ordinary chat (no Goal) to a bounded handoff ---
+
+    def user_turn(self, turn="turn", used=41):
+        self.goal_turn(turn=turn, trigger="user", used=used)
+
+    def plain_arm(self, turn="turn", tool="exec_command"):
+        result = self.pre(tool, turn=turn)
+        self.assertTrue(denied(result), result)
+        self.state = handoff.store_for(self.root, "session", turn)
+        self.nonce = json.loads(self.state.read_text())["nonce"]
+        return result
+
+    def plain_capture(self, message=None, turn="turn"):
+        answer = {"last_assistant_message": message or f"HANDOFF READY {self.nonce}\n# Note\nNext: tests."}
+        with patch.object(handoff.subprocess, "Popen") as launch, self.eligible():
+            result = handoff.stop_hook(self.payload(turn_id=turn, **answer), self.root, "t1")
+        return result, launch
+
+    def test_no_goal_long_turn_arms_at_a_tool_boundary_without_consent(self):
+        # Portfolio t128 (01a1d13c): no Goal row, past 40%, nudged once at PostToolUse, and the turn ran
+        # on for an hour to 52% because Stop never came. 0.5.0 arms at the next tool call instead.
+        self.user_turn(used=40)
+        self.assertEqual(self.pre(), {})  # not past the threshold
+        self.user_turn()
+        self.assertFalse(self.db.exists() or (self.root / "goal-transfer.json").exists())  # no Goal, no consent
+        for blocked in ("off", "check", "unknown", "goal trigger", "goal tool"):
+            with self.subTest(blocked):
+                if blocked == "off":
+                    self.control("handoff off")
+                    self.assertEqual(self.pre(), {})
+                    self.control("handoff on")
+                elif blocked == "check":
+                    with patch.object(handoff, "check_chat", return_value=(None, "not here")):
+                        self.assertEqual(self.pre(), {})
+                elif blocked == "unknown":
+                    self.db.write_bytes(b"garbage" * 100)
+                    self.assertEqual(self.pre(), {})  # never treated as "no Goal"
+                    self.db.unlink()
+                elif blocked == "goal trigger":
+                    self.goal_turn()  # a Goal turn without a Goal row is an unknown state
+                    self.assertEqual(self.pre(), {})
+                    self.user_turn()
+                else:
+                    self.assertEqual(self.pre("get_goal"), {})
+                self.assertFalse(handoff.store_for(self.root, "session", "turn").exists())
+        size = self.transcript.stat().st_size
+        reason = self.plain_arm()["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("this tool call was not run", reason)
+        self.assertIn("this chat continues in a fresh chat now", reason)
+        self.assertIn("at most 3 more tool call(s), only to reach a safe checkpoint", reason)
+        self.assertIn(f"HANDOFF READY {self.nonce}\n", reason)
+        for goal_word in ("GOAL", "get_goal", "update_goal", "create_goal", "Goal is active"):
+            self.assertNotIn(goal_word, reason)
+        record = json.loads(self.state.read_text())
+        self.assertEqual((record["origin"], record["offset"], "goal" in record), ("tool", size, False))
+        self.assertFalse((self.root / "session" / ".goal-requested").exists())
+        self.assertFalse(self.db.exists())  # the Goal DB was only read, never created
+        with self.eligible():
+            self.assertEqual(handoff.tool_hook(self.payload(), self.root, "t1"), {})  # no extra nudge
+
+    def test_no_goal_checkpoint_is_finite_and_scripts_are_bounded(self):
+        self.user_turn()
+        self.plain_arm()
+        gate = lambda: json.loads(self.state.with_suffix(".gate").read_text())
+        self.assertEqual((gate()["checkpoint"], gate()["scripts"]), (3, 3))
+        # No Goal tool runs in an ordinary handoff, and a denial costs no checkpoint call.
+        for tool, args in (("get_goal", {}), ("update_goal", {"status": "paused"}), ("create_goal", {"objective": "x"})):
+            self.assertTrue(denied(self.pre(tool, args)), tool)
+        self.assertEqual((gate()["checkpoint"], gate()["scripts"]), (3, 3))
+        # A code-mode wrapper takes a script; each nested call takes a checkpoint call, once.
+        self.assertEqual(self.pre("exec"), {})
+        self.assertEqual(self.pre("exec_command"), {})
+        self.assertEqual((gate()["checkpoint"], gate()["scripts"]), (2, 2))
+        # Scripts with no nested call are bounded by their own allowance.
+        self.assertEqual(self.pre("exec"), {})
+        self.assertEqual(self.pre("exec"), {})
+        self.assertIn("no more scripts", self.pre("exec")["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertEqual(self.pre("apply_patch"), {})
+        self.assertEqual(self.pre("mcp__herdr__send"), {})
+        self.assertEqual(gate()["checkpoint"], 0)
+        for tool in ("exec", "apply_patch", "exec_command"):
+            reason = self.pre(tool)["hookSpecificOutput"]["permissionDecisionReason"]
+            self.assertIn("allowance is used up", reason)
+            self.assertIn(f"HANDOFF READY {self.nonce}, then the handoff note", reason)
+        while gate()["denied"] < handoff.MAX_DENIALS:
+            self.assertTrue(denied(self.pre("apply_patch")))
+        given_up = self.pre("apply_patch")
+        self.assertNotIn("hookSpecificOutput", given_up)
+        self.assertIn("put off (the model kept calling tools after 12 denials)", given_up["systemMessage"])
+        self.assertIn("gave up", self.state.with_suffix(".released").read_text())
+        self.assertIn("put off", self.state.with_suffix(".closed").read_text())
+        # Released: never armed again in the same turn, however far the context grows.
+        self.append(event("token_count", info=usage(90)))
+        for _ in range(3):
+            self.assertEqual(self.pre("apply_patch"), {})
+        self.assertEqual(sorted(p.name for p in (self.root / "session").iterdir() if p.name.startswith("turn")),
+                         ["turn", "turn.closed", "turn.gate", "turn.gate-lock", "turn.released"])
+        # A later turn re-arms only after 5 more points, and at most 3 attempts per chat.
+        for attempt, used in ((2, 46), (3, 51)):
+            self.user_turn(turn=f"t{attempt}", used=used - 1)
+            self.assertEqual(self.pre(turn=f"t{attempt}"), {})
+            self.user_turn(turn=f"t{attempt}", used=used)
+            self.plain_arm(turn=f"t{attempt}")
+            outcomes = [self.pre("exec", turn=f"t{attempt}") for _ in range(3 + handoff.MAX_DENIALS + 3)]
+            # 3 scripts, 12 denials, then the give-up; afterwards nothing is held.
+            self.assertEqual([denied(o) for o in outcomes], [False] * 3 + [True] * 12 + [False] * 3)
+            last = outcomes[15]
+            self.assertEqual(outcomes[16:], [{}, {}])
+        self.assertIn("no longer held for a handoff in this chat after 3 attempts", last["systemMessage"])
+        self.user_turn(turn="t4", used=90)
+        self.assertEqual(self.pre(turn="t4"), {})
+        with self.eligible():  # the Stop request at the end of a turn is unchanged
+            self.assertEqual(handoff.stop_hook(self.payload(turn_id="t4"), self.root, "t1")["decision"], "block")
+        # No checkpoint calls at all when the allowance is 0: even the wrapper is denied.
+        shutil.rmtree(self.root / "session")
+        self.user_turn()
+        with patch.dict(os.environ, {"CODEX_CONTEXT_HANDOFF_CHECKPOINT_CALLS": "0"}):
+            self.assertIn("Start no new work", self.plain_arm()["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertTrue(denied(self.pre("exec")))
+
+    def test_no_goal_gate_yields_to_user_input_and_handoff_off(self):
+        self.user_turn()
+        self.plain_arm()
+        self.append(steer('<hc from="t2">worker done</hc>'))
+        result = self.pre("apply_patch")
+        self.assertNotIn("hookSpecificOutput", result)  # the user's (or worker's) message wins at once
+        self.assertIn("put off (user input arrived after the handoff was armed)", result["systemMessage"])
+        self.assertEqual(json.loads((self.root / "session" / handoff.PLAIN_RETRY).read_text())["count"], 1)
+        self.assertEqual(self.pre("apply_patch"), {})
+        # Input after the arm and a turn that ends without the note: put off, never asked again.
+        shutil.rmtree(self.root / "session")
+        self.user_turn()
+        self.plain_arm()
+        self.append(steer("actually, stop and tell me the status"))
+        result, launch = self.plain_capture("Here is the status.")
+        launch.assert_not_called()
+        self.assertNotIn("decision", result)
+        self.assertIn("user input arrived after the handoff was armed", self.state.with_suffix(".closed").read_text())
+        # Input after the arm and a turn whose final answer is a valid note (no tool call between): no switch.
+        for message in (steer("<hc from=\"t2\">new task</hc>"), response(type="message", role="user", content=[
+                {"type": "input_text", "text": "wait"}])):
+            with self.subTest(message=message["type"]):
+                shutil.rmtree(self.root / "session")
+                self.user_turn()
+                self.plain_arm()
+                self.append(message)
+                result, launch = self.plain_capture()
+                launch.assert_not_called()
+                self.assertIn("put off (user input arrived after the handoff was armed)", result["systemMessage"])
+                self.assertFalse(self.state.with_suffix(".md").exists())
+                self.assertFalse((self.root / "t1.switch").exists())
+        # `handoff off` cancels the armed handoff and frees the turn.
+        shutil.rmtree(self.root / "session")
+        self.user_turn()
+        self.plain_arm()
+        self.assertIn("Cancelled 1", self.control("handoff off")["reason"])
+        self.assertEqual(self.pre("apply_patch"), {})
+        self.control("handoff on")
+        self.assertEqual(self.pre("apply_patch"), {})  # a cancelled handoff stays cancelled
+        # A closing prompt skips its turn; an interrupted held turn is settled as a put-off attempt.
+        shutil.rmtree(self.root / "session")
+        handoff.mark_closing({"session_id": "session", "turn_id": "turn", "prompt": "wrap up"}, self.root)
+        self.user_turn()
+        self.assertEqual(self.pre(), {})
+        self.user_turn(turn="next")
+        self.plain_arm(turn="next")
+        self.user_turn(turn="after", used=47)
+        result = self.pre(turn="after")
+        self.assertTrue(denied(result))  # settled, then armed again after 5 more points
+        self.assertIn("put off (the turn ended without a handoff note)", result["systemMessage"])
+
+    def test_no_goal_mid_turn_handoff_switches_without_goal_tools(self):
+        self.user_turn()
+        self.plain_arm()
+        self.assertEqual(self.pre("apply_patch"), {})
+        result, launch = self.plain_capture()
+        launch.assert_called_once()
+        self.assertIn("handoff off", result["systemMessage"])
+        self.assertNotIn("Goal", result["systemMessage"])
+        self.assertEqual(self.state.with_suffix(".md").read_text(), "# Note\nNext: tests.\n")
+        self.assertFalse(self.state.with_suffix(".goal.json").exists())
+        self.assertNotIn("create_goal", handoff.continuation(json.loads(self.state.read_text()), self.state))
+        # A turn that ends without the note is asked once more (same nonce), then closed.
+        shutil.rmtree(self.root / "session")
+        self.user_turn()
+        self.plain_arm()
+        again, launch = self.plain_capture("Working.")
+        self.assertEqual(again["decision"], "block")
+        self.assertIn(f"HANDOFF READY {self.nonce}\n", again["reason"])
+        self.assertNotIn("GOAL", again["reason"])
+        final, launch = self.plain_capture("Still working.")
+        launch.assert_not_called()
+        self.assertEqual(final, {})
+        self.assertIn("no handoff note", self.state.with_suffix(".closed").read_text())
+
+    def test_a_goal_appearing_after_a_no_goal_arm_never_switches(self):
+        # At the next tool call: released and put off, the Goal untouched.
+        self.user_turn()
+        self.plain_arm()
+        self.set_goal()
+        result = self.pre("apply_patch")
+        self.assertNotIn("hookSpecificOutput", result)
+        self.assertIn("a Goal (active) appeared in this chat after the handoff was armed", result["systemMessage"])
+        self.assertTrue(self.state.with_suffix(".released").is_file())
+        self.assertEqual(handoff.goal_state(self.transcript, "session")[1]["updated_at_ms"], CREATED_MS + 1000)
+        self.assertEqual(self.pre("apply_patch"), {})
+        # A turn that only gives its final answer after the Goal appears: capture fails explicitly.
+        for change in ("goal", "unknown"):
+            with self.subTest(change):
+                shutil.rmtree(self.root / "session")
+                self.db.unlink()
+                self.user_turn()
+                self.plain_arm()
+                if change == "goal":
+                    self.set_goal(status="paused")
+                else:
+                    self.db.write_bytes(b"garbage" * 100)
+                result, launch = self.plain_capture()
+                launch.assert_not_called()
+                self.assertIn("so nothing was handed off and no Goal was touched", result["systemMessage"])
+                self.assertIn("a Goal (paused) appeared" if change == "goal" else "could not be read",
+                              result["systemMessage"])
+                self.assertFalse(self.state.with_suffix(".md").exists())
+                self.assertTrue(self.state.with_suffix(".closed").is_file())
+        # An unreadable Goal state at a held tool call releases the handoff, visibly.
+        shutil.rmtree(self.root / "session")
+        self.db.unlink()
+        self.user_turn()
+        self.plain_arm()
+        self.db.write_bytes(b"garbage" * 100)
+        self.assertIn("the Goal state could not be read", self.pre("apply_patch")["systemMessage"])
+        # No note and a Goal appeared: put off instead of asking once more.
+        shutil.rmtree(self.root / "session")
+        self.db.unlink()
+        self.user_turn()
+        self.plain_arm()
+        self.set_goal()
+        result, launch = self.plain_capture("Done for now.")
+        self.assertNotIn("decision", result)
+        self.assertIn("put off", self.state.with_suffix(".closed").read_text())
+        # The switch checks again during the grace window and before the continuation.
+        self.db.unlink()
+        record = json.loads(self.state.read_text())
+        info = {"status": {"app": "codex", "state": "idle"}, "turn": 3}
+        with patch.object(handoff, "terminal_info", return_value=info), (
+            patch.object(handoff, "read_composer", return_value="› ")
+        ), patch.object(handoff.time, "sleep", side_effect=lambda _: self.set_goal()):
+            with self.assertRaisesRegex(RuntimeError, "appeared in this chat"):
+                handoff.hold_for_cancel(record, self.state, "› ", 30, 3)
+        self.assertIn("appeared", handoff.goal_changed(record))
+        self.db.unlink()
+        self.assertIsNone(handoff.goal_changed(record))
+
+    def test_manual_no_goal_handoff_is_held_and_switches(self):
+        self.user_turn(used=20)
+        payload = dict(self.payload(), prompt="handoff now")
+        with self.eligible():
+            context = handoff.manual_hook(payload, self.root, "t1")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("the user asked to hand this chat off now", context)
+        self.assertIn("at most 3 more tool call(s)", context)
+        self.assertNotIn("GOAL", context)
+        self.state = handoff.store_for(self.root, "session", "turn")
+        self.nonce = json.loads(self.state.read_text())["nonce"]
+        self.append(steer("handoff now"))  # the arming prompt is not an objection
+        for _ in range(3):
+            self.assertEqual(self.pre("apply_patch"), {})
+        self.assertTrue(denied(self.pre("apply_patch")))
+        self.append({"type": "compacted", "payload": {}})
+        self.assertTrue(denied(self.pre("apply_patch")))  # an explicit request is not released by compaction
+        result, launch = self.plain_capture()
+        launch.assert_called_once()
+
+    def test_goal_chats_keep_their_own_paths(self):
+        # An active Goal without consent never gets an ordinary handoff instead of the transfer.
+        self.set_goal()
+        self.user_turn()
+        self.assertEqual(self.pre(), {})
+        self.assertFalse(handoff.store_for(self.root, "session", "turn").exists())
+        # A Goal that is not active is left to the Stop request, which leaves it alone.
+        self.set_goal(status="paused")
+        self.assertEqual(self.pre(), {})
+        with self.eligible():
+            self.assertIn("with status paused. Do not change it",
+                          handoff.stop_hook(self.payload(), self.root, "t1")["reason"])
+        # An ordinary put-off attempt does not hold back a later Goal transfer.
+        shutil.rmtree(self.root / "session")
+        self.db.unlink()
+        self.user_turn()
+        self.plain_arm()
+        self.append(steer())
+        self.pre("apply_patch")
+        self.set_goal()
+        self.consent()
+        self.goal_turn(turn="goal")
+        self.assertIn("GOAL TRANSFER", self.gate_arm(turn="goal"))
+
+    def test_nudge_is_not_used_up_by_a_failed_chat_check(self):
+        self.user_turn()
+        with self.eligible(), patch.object(handoff, "check_chat", return_value=(None, "hc failed")):
+            self.assertEqual(handoff.tool_hook(self.payload(), self.root, "t1"), {})
+        self.assertFalse(handoff.store_for(self.root, "session", "turn").with_suffix(".nudged").exists())
+        with self.eligible():
+            self.assertIn("safe", handoff.tool_hook(self.payload(), self.root, "t1")
+                          ["hookSpecificOutput"]["additionalContext"])
 
     # --- the fresh chat ---
 
