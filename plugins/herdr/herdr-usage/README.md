@@ -96,8 +96,8 @@ A CLI whose config folder does not exist is skipped. If the folder exists but `s
 | Source | How | Shown as |
 | :- | :- | :- |
 | Codex | A short-lived `codex app-server` runs `account/rateLimits/read` (15 s limit; its process group is killed afterwards). If that fails, the newest `rate_limits` event in recent `$CODEX_HOME/sessions` rollouts, with the event's own time | 실시간 조회 / Codex 턴 기록 |
-| Claude Code | The statusline wrapper keeps `rate_limits` and `context_window`, one file per session | 세션 수신 (what the session last received) |
-| Antigravity | The same wrapper keeps the `quota` buckets and `context_window` | 세션 수신 |
+| Claude Code | Existing local OAuth login queries subscription usage directly; statusline captures remain a fallback and provide context | 실시간 조회 / 세션 수신 |
+| Antigravity | On Windows, the CLI's read-only `-p /usage --output-format json` refreshes quota without an agent turn; statusline captures remain a fallback | 실시간 조회 / 세션 수신 |
 | Ollama Cloud | `GET ollama.com/api/balance`, signed with the device key `~/.ollama/id_ed25519`, or `OLLAMA_API_KEY` as a Bearer token | 실시간 조회 |
 | Ollama local | HTTP only: `127.0.0.1:11434/api/version` and `/api/ps`. The `ollama` CLI is never run | 로컬 실행 중 / 꺼짐 |
 
@@ -122,7 +122,7 @@ You can always switch back to Herdr's layout with `ctrl-shift-l` or `herdr-app d
 
 ### Limits
 
-- Claude Code and agy values are as new as their last running session. With no session running they go stale, and after a reset they wait for a new value.
+- Direct subscription queries need a valid local login and the Herdr usage bar open. They run without an agent terminal. Where direct queries are unavailable, session captures retain their original observation time and can become stale.
 - The Ollama device-key signature for `/api/balance` is undocumented; the documented way is an API key. If it stops working, set `OLLAMA_API_KEY` in the environment Herdr runs with.
 - A project-level `.claude/settings*.json` with its own `statusLine`, or a Claude config folder the installer did not wrap, adds no data.
 - If agy prints nothing in `stack_with_default` mode, it may add a blank line under its built-in line.
@@ -209,7 +209,8 @@ Windows 설치기는 기본 native/npm Codex 설치의 `codex.exe`를 찾습니�
 ### 숫자의 출처
 
 - Codex: 짧게 띄운 `codex app-server`의 `account/rateLimits/read`(15초 제한, 끝나면 프로세스 그룹 종료). 실패하면 최근 `$CODEX_HOME/sessions` 기록의 최신 `rate_limits` 이벤트와 그 이벤트 시각
-- Claude Code, Antigravity: statusLine 래퍼가 세션별로 남긴 한도와 컨텍스트 값(세션 수신)
+- Claude Code: 기존 로컬 OAuth 로그인으로 구독 사용량을 직접 조회. statusLine 값은 예비 경로와 컨텍스트 표시에 사용
+- Antigravity: Windows에서 공식 CLI의 읽기 전용 `-p /usage --output-format json`으로 모델 호출 없이 한도를 새로 조회. statusLine은 예비 경로
 - Ollama Cloud: 기기 키 `~/.ollama/id_ed25519`로 서명하거나 `OLLAMA_API_KEY`를 Bearer로 보낸 `GET ollama.com/api/balance`
 - Ollama 로컬: HTTP만 사용(`127.0.0.1:11434`). `ollama` CLI는 실행하지 않습니다.
 
@@ -228,7 +229,7 @@ node uninstall.mjs --keep-files  # statusLine만 되돌림
 
 ### 한계
 
-- Claude Code와 agy 값은 마지막으로 실행된 세션만큼만 새롭습니다. 실행 중인 세션이 없으면 오래된 값이 되고, 리셋 뒤에는 새 값을 기다립니다.
+- 직접 조회에는 유효한 로컬 로그인과 열린 Herdr 사용량 표시줄이 필요합니다. 에이전트 터미널은 열지 않아도 됩니다. 직접 조회가 불가능하면 세션 수신값의 원래 시각을 유지하며 오래된 값으로 표시합니다.
 - Ollama 기기 키 서명 방식은 공개 문서에 없습니다. 동작하지 않으면 Herdr가 실행되는 환경에 `OLLAMA_API_KEY`를 설정합니다.
 - 프로젝트의 `.claude/settings*.json`에 별도 `statusLine`이 있거나 설치기가 감싸지 않은 Claude 설정 폴더를 쓰는 세션은 값을 보내지 않습니다.
 

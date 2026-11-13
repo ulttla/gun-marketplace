@@ -23,7 +23,16 @@ quota fields locally after the command exits. No model prompts are sent.
 If an existing command starts with `bash`, the wrapper also finds Git Bash in
 its standard Program Files location when absent from PATH.
 
-Claude and Antigravity quota fields arrive with their next statusline response.
+Claude and Antigravity subscription quotas are also queried directly while the
+Herdr usage bar is open, without opening an agent terminal or sending a model
+prompt. The bar checks every minute; network queries run at most every five
+minutes (manual refresh: once a minute). Statusline captures remain a fallback
+and provide per-terminal context usage. A failed query preserves the last good
+value and its original observation time.
+
+Claude uses the account recorded in `usage/install.json` and renews its existing
+OAuth credentials when expired. Antigravity uses its local Windows login.
+If the login has been revoked, sign in again through the corresponding CLI.
 A CLI whose config folder does not exist is skipped. To wrap a separate Claude
 account, set `CLAUDE_CONFIG_DIR` to that account's local folder before installing
 or updating. Switching config folders does not transfer credentials.
@@ -49,7 +58,7 @@ statusLines are preserved.
 ## Validation
 
 ```powershell
-node --test test/parse.test.mjs test/windows.test.mjs
+node --test test/parse.test.mjs test/windows.test.mjs test/claude.test.mjs test/agy.test.mjs test/account-source.test.mjs
 ```
 
 CI runs the synthetic parsers and native-wrapper tests on Windows. The additional

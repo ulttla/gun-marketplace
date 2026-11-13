@@ -43,4 +43,4 @@ jobs:
       - name: Windows parsers and native statusline wrapper
         if: runner.os == 'Windows'
         working-directory: plugins/herdr/herdr-usage
-        run: node --test test/parse.test.mjs test/windows.test.mjs
+        run: node --test test/parse.test.mjs test/windows.test.mjs test/claude.test.mjs test/agy.test.mjs test/account-source.test.mjs
