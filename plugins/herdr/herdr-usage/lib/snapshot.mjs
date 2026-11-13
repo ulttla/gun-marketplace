@@ -1,4 +1,4 @@
-// Build the normalized snapshot. Network sources (Codex, Ollama cloud) are polled
+// Build the normalized snapshot. Account usage sources are polled
 // at most every POLL_S; statusline captures and local Ollama are read every run.
 // A failed poll keeps the last good groups and their original observed_at.
 import fs from "node:fs";
@@ -8,6 +8,8 @@ import { readCaptures } from "./capture.mjs";
 import { WRAP_RE } from "./settings.mjs";
 import { groupsFromCaptures, contextsFromCaptures } from "./merge.mjs";
 import { collectCodex } from "./sources/codex.mjs";
+import { collectClaude } from "./sources/claude.mjs";
+import { collectAgy } from "./sources/agy.mjs";
 import { collectOllamaCloud, localStatus } from "./sources/ollama.mjs";
 import { snapshotPath, collectorStatePath, writeAtomic, readJson, nowS, withLock, installInfo } from "./util.mjs";
 
@@ -88,6 +90,39 @@ function statuslineSource(name, captures, installed) {
   };
 }
 
+/** Direct account queries are authoritative; session captures remain a fallback. */
+export function accountSource(name, st, captures, installed, now = nowS()) {
+  const direct = networkSource(name, st, now);
+  const fallback = statuslineSource(name, captures, installed);
+  if (direct.groups.length) {
+    let partial = false;
+    const groups = direct.groups.map((g) => {
+      const old = fallback.groups.find((c) => c.key === g.key);
+      const ids = new Set(g.windows.map((w) => w.id));
+      const missing = (old?.windows ?? []).filter((w) => !ids.has(w.id));
+      if (!missing.length) return g;
+      partial = true;
+      const windows = [
+        ...g.windows.map((w) => ({ ...w, observed_at: w.observed_at ?? g.observed_at })),
+        ...missing.map((w) => ({ ...w, observed_at: w.observed_at ?? old.observed_at })),
+      ];
+      return { ...g, windows, observed_at: Math.min(...windows.map((w) => w.observed_at ?? 0)) || null };
+    });
+    return partial ? { ...direct, groups,
+      observed_at: Math.min(...groups.map((g) => g.observed_at ?? 0)) || null,
+      message_ko: `${direct.message_ko} · 일부 한도는 마지막 세션 값`,
+    } : direct;
+  }
+  if (!st[name]) return fallback;
+  return {
+    ...direct,
+    groups: fallback.groups,
+    observed_at: fallback.observed_at,
+    method: fallback.groups.length ? "statusline" : direct.method,
+    message_ko: direct.message_ko + (fallback.groups.length ? " · 마지막 세션 값 표시" : ""),
+  };
+}
+
 export async function buildSnapshot({ mode = "due" } = {}) {
   const now = nowS();
   const st = readJson(collectorStatePath(), {}) ?? {};
@@ -99,6 +134,11 @@ export async function buildSnapshot({ mode = "due" } = {}) {
   };
   const jobs = [];
   if (due("codex")) jobs.push(collectCodex().then((r) => { st.codex = applyPoll(st.codex, r, nowS()); }));
+  // macOS Claude usually keeps its login in Keychain, not .credentials.json;
+  // retain its working statusline path when file-based OAuth is unavailable.
+  const claudeFileLogin = process.platform !== "darwin" || fs.existsSync(path.join(path.dirname(claudeSettingsPath()), ".credentials.json"));
+  if (claudeFileLogin && due("claude")) jobs.push(collectClaude({ settingsPath: claudeSettingsPath() }).then((r) => { st.claude = applyPoll(st.claude, r, nowS()); }));
+  if (process.platform === "win32" && due("agy")) jobs.push(collectAgy().then((r) => { st.agy = applyPoll(st.agy, r, nowS()); }));
   if (due("ollama")) jobs.push(collectOllamaCloud().then((r) => { st.ollama = applyPoll(st.ollama, r, nowS()); }));
   const localP = localStatus();
   await Promise.all(jobs);
@@ -112,8 +152,8 @@ export async function buildSnapshot({ mode = "due" } = {}) {
     poll_s: POLL_S,
     sources: {
       codex: networkSource("codex", st, now),
-      claude: statuslineSource("claude", cc, wrapperInstalled(claudeSettingsPath())),
-      agy: statuslineSource("agy", ac, wrapperInstalled(agySettingsPath())),
+      claude: accountSource("claude", st, cc, wrapperInstalled(claudeSettingsPath()), now),
+      agy: accountSource("agy", st, ac, wrapperInstalled(agySettingsPath()), now),
       ollama: networkSource("ollama", st, now),
     },
     contexts: [...contextsFromCaptures("claude", cc, now), ...contextsFromCaptures("agy", ac, now)],

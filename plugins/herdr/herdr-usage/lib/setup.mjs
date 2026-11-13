@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { appHomeDir, usageHome, readJson } from "./util.mjs";
 
-export const VERSION = "0.1.2";
+export const VERSION = "0.1.3";
 export const MIN_NODE = 22;
 export const MODS = ["gun-usage-bar", "gun-usage-detail"];
 export const LAYOUT = "gun-usage";

@@ -78,7 +78,7 @@ export function shortLabel(w) {
 export const STATUS_KO = { ok: "정상", unavailable: "대기", connect_needed: "연결 필요", error: "오류" };
 
 export function methodKo(m) {
-  return { "app-server": "실시간 조회", rollout: "Codex 턴 기록", statusline: "세션 수신", "device-key": "실시간 조회", "api-key": "실시간 조회" }[m] ?? (m ?? "");
+  return { "app-server": "실시간 조회", rollout: "Codex 턴 기록", statusline: "세션 수신", "device-key": "실시간 조회", "api-key": "실시간 조회", "oauth-api": "실시간 조회", "quota-api": "실시간 조회" }[m] ?? (m ?? "");
 }
 
 /** Newest of several snapshots (by generated_at). */
