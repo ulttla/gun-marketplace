@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { installStatusLine, uninstallStatusLine, isWrapper, originalFromWrapper } from "../lib/settings.mjs";
+import { installStatusLine, uninstallStatusLine, isWrapper, originalFromWrapper, wrapperCommand } from "../lib/settings.mjs";
 import { findHerdrApp, findCodex, which } from "../lib/setup.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -93,4 +93,60 @@ test("Windows: discovers a native executable using PATHEXT-style exe suffix", { 
   assert.equal(which("node"), process.execPath);
   const found = findCodex();
   if (found) assert.match(found, /\.exe$/i);
+});
+
+test("Windows agy: cmd argument quoting, Unicode paths, pass-through and upgrade", { skip: process.platform !== "win32" }, () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "usage agy '한글 &-"));
+  try {
+    copyTree(path.join(repo, "bin"), path.join(home, "bin"));
+    copyTree(path.join(repo, "lib"), path.join(home, "lib"));
+    fs.writeFileSync(path.join(home, "package.json"), '{"type":"module"}');
+    const file = path.join(home, "settings.json"), origFile = path.join(home, "state", "original.json");
+    const wrapPath = path.join(home, "bin", "statusline-wrap.mjs");
+    const script = path.join(home, "original.mjs");
+    fs.writeFileSync(script, 'import fs from "node:fs"; process.stdout.write(fs.readFileSync(0)); process.stderr.write("original-stderr"); process.exitCode=7;');
+    const original = `"${process.execPath}" "${script}"`;
+    const before = JSON.stringify({ model: "keep", statusLine: { type: "command", command: original } }, null, 2) + "\n";
+    fs.writeFileSync(file, before);
+    const params = { file, src: "agy", wrapPath, origFile };
+    installStatusLine(params);
+    const sl = JSON.parse(fs.readFileSync(file)).statusLine;
+    assert.ok(isWrapper(sl));
+    assert.equal(originalFromWrapper(sl), original);
+    assert.equal(installStatusLine(params).changed, false);
+    const input = Buffer.concat([fs.readFileSync(path.join(repo, "test/fixtures/agy-statusline.json")), Buffer.alloc(1024 * 1024, 0x20)]);
+    const env = { ...process.env, HERDR_USAGE_HOME: home };
+    // No shell:true: reproduce agy's cmd.exe /c invocation, including normal
+    // Windows argv escaping instead of Node's verbatim shell command mode.
+    const run = (command) => spawnSync(process.env.ComSpec || "cmd.exe", ["/c", command], { input, env, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+    const legacy = `"${process.execPath}" "${wrapPath}" agy ${Buffer.from(original).toString("base64")}`;
+    assert.notEqual(run(legacy).status, 0, "the old launcher reproduces the reported failure");
+    const result = run(sl.command);
+    assert.equal(result.status, 7, result.stderr?.toString());
+    assert.deepEqual(result.stdout, input);
+    assert.equal(result.stderr.toString(), "original-stderr");
+    assert.ok(fs.readdirSync(path.join(home, "cache", "captures")).some(n => n.startsWith("agy-")));
+    const silent = run(wrapperCommand(wrapPath, "agy", ""));
+    assert.equal(silent.status, 0, silent.stderr?.toString());
+    assert.equal(silent.stdout.length, 0);
+    assert.equal(silent.stderr.length, 0);
+
+    // Both the original quoted launcher and the local unquoted workaround
+    // must migrate without changing the saved statusline or unrelated keys.
+    const saved = fs.readFileSync(origFile, "utf8");
+    for (const command of [legacy, `C:/PROGRA~1/nodejs/node.exe C:/usage/bin/statusline-wrap.mjs agy ${Buffer.from(original).toString("base64")}`]) {
+      fs.writeFileSync(file, JSON.stringify({ model: "keep", statusLine: { ...sl, command } }, null, 2) + "\n");
+      assert.ok(installStatusLine(params).changed);
+      assert.equal(JSON.parse(fs.readFileSync(file)).model, "keep");
+      assert.deepEqual(JSON.parse(fs.readFileSync(file)).statusLine, sl);
+      assert.equal(fs.readFileSync(origFile, "utf8"), saved);
+    }
+    assert.ok(uninstallStatusLine(params).changed);
+    assert.equal(fs.readFileSync(file, "utf8"), before);
+    // Recovery still works if the saved state is lost.
+    installStatusLine(params);
+    fs.unlinkSync(origFile);
+    assert.ok(uninstallStatusLine(params).changed);
+    assert.equal(JSON.parse(fs.readFileSync(file)).statusLine.command, original);
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
