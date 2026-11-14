@@ -2,7 +2,7 @@
 // per window, the newest reset wins; captures of the same window (reset within
 // SAME_WINDOW_S) take the max used percent, so an idle older session can never
 // pull a newer account value backwards.
-import { agyWindow } from "./capture.mjs";
+import { agyWindow, accountOf } from "./capture.mjs";
 
 const SAME_WINDOW_S = 300;
 
@@ -58,6 +58,8 @@ export function groupsFromCaptures(captures) {
     groups.push({
       key,
       label: list[0].account_label ?? "기본",
+      // The default account's name is translated by the mods; read from the key, so older captures count too.
+      ...(key === accountOf(list[0].source, {}).key && (list[0].account_label ?? "기본") === "기본" ? { label_key: "default" } : {}),
       plan: plans[0] ?? null,
       observed_at: Math.max(...list.map((c) => c.quota_observed_at ?? 0)) || null,
       windows,

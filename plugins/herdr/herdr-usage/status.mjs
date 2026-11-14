@@ -23,6 +23,7 @@ for (const [src, file] of [["claude", info.settings?.claude || claudeSettingsPat
 const out = {
   installed: fs.existsSync(path.join(P.usage, "bin", "herdr-usage")),
   version: info.version ?? null,
+  language: info.language ?? null,
   usage_home: P.usage,
   mods: Object.fromEntries(MODS.map((m) => [m, isOurMod(path.join(P.mods, m))])),
   layout: { exists: isOurLayout(P.layout), shown: shown === LAYOUT, current: shown },
@@ -37,6 +38,7 @@ if (process.argv.includes("--json")) {
   const yes = (b) => (b ? "yes" : "no");
   const lines = [
     `installed:   ${yes(out.installed)}${out.version ? ` (${out.version})` : ""} at ${out.usage_home}`,
+    `language:    ${out.language ?? (out.installed ? "not recorded (installed before 0.1.5; Korean)" : "-")}`,
     `mods:        ${MODS.map((m) => `${m} ${yes(out.mods[m])}`).join(", ")}`,
     `layout:      ${LAYOUT} ${out.layout.exists ? "present" : "absent"}${shown == null ? " (no Herdr window answered)" : out.layout.shown ? ", shown" : `, shown layout is ${shown}`}`,
     ...Object.entries(settings).map(([src, s]) => `statusline:  ${src} ${s.wrapped ? "wrapped" : "not wrapped"} (${s.file})`),

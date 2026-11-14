@@ -4,6 +4,7 @@ import os from "node:os";
 import { findAgy } from "../setup.mjs";
 import { agyWindow } from "../capture.mjs";
 import { nowS, windowOf, installInfo } from "../util.mjs";
+import { msg } from "../messages.mjs";
 
 export function parseAgyQuota(payload, observed = nowS()) {
   // Supported read-only print command. Reject an agent response, cached session,
@@ -25,7 +26,7 @@ export function parseAgyQuota(payload, observed = nowS()) {
     if (b.disabled === true) w.disabled = true;
     windows.push(w);
   }
-  return windows.length ? [{ key: "agy-default", label: "기본", plan: null,
+  return windows.length ? [{ key: "agy-default", label: "기본", label_key: "default", plan: null,
     observed_at: observed, windows, credits: null, balance_usd: null, spend: null }] : [];
 }
 
@@ -55,14 +56,14 @@ export async function collectAgy({ read = readQuota, now = nowS } = {}) {
     if (payload.error) {
       const connect = ["login_required", "http_401", "http_403"].includes(payload.error);
       return { ...base, status: connect ? "connect_needed" : "error",
-        message_ko: connect ? "Antigravity 로그인 확인 필요" : "Antigravity 사용량 조회 실패",
+        ...msg([connect ? "agy_login" : "agy_failed"]),
         last_error: /^[a-z0-9_]{1,40}$/.test(payload.error) ? payload.error : "quota_unavailable",
         retry_until: payload.error === "http_429" ? observed + (payload.retry_seconds || 300) : null };
     }
     const groups = parseAgyQuota(payload, observed);
-    if (!groups.length) return { ...base, status: "unavailable", message_ko: "사용량 조회 응답에 구독 한도 없음" };
-    return { ...base, groups, status: "ok", message_ko: "실시간 조회 (터미널 실행 불필요)" };
+    if (!groups.length) return { ...base, status: "unavailable", ...msg(["agy_no_quota"]) };
+    return { ...base, groups, status: "ok", ...msg(["agy_live"]) };
   } catch {
-    return { ...base, status: "error", message_ko: "Antigravity 사용량 조회 실패", last_error: "quota_command_failed" };
+    return { ...base, status: "error", ...msg(["agy_failed"]), last_error: "quota_command_failed" };
   }
 }

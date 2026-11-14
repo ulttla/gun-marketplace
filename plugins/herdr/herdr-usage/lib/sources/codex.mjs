@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { windowOf, nowS, toEpochS, errText, installInfo } from "../util.mjs";
+import { msg } from "../messages.mjs";
 
 function codexBin() {
   if (process.env.HERDR_USAGE_CODEX) return process.env.HERDR_USAGE_CODEX;
@@ -173,11 +174,11 @@ export async function collectCodex() {
   try {
     const result = await readAppServer();
     const groups = parseAppServerResult(result, nowS());
-    if (groups.length) return { status: "ok", method: "app-server", groups, message_ko: "실시간 조회", last_error: null };
+    if (groups.length) return { status: "ok", method: "app-server", groups, ...msg(["live"]), last_error: null };
     throw new Error("empty");
   } catch (e) {
     const groups = readRollouts();
-    if (groups.length) return { status: "ok", method: "rollout", groups, message_ko: "마지막 Codex 턴 기록", last_error: `app-server: ${errText(e)}` };
-    return { status: "error", method: "app-server", groups: [], message_ko: "Codex 조회 실패", last_error: errText(e) };
+    if (groups.length) return { status: "ok", method: "rollout", groups, ...msg(["codex_rollout"]), last_error: `app-server: ${errText(e)}` };
+    return { status: "error", method: "app-server", groups: [], ...msg(["codex_failed"]), last_error: errText(e) };
   }
 }

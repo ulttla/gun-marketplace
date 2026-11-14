@@ -4,8 +4,11 @@
 // wrapper for Claude Code and Antigravity (agy), and the gun-usage layout (a copy
 // of Herdr's main layout whose status bar is gun-usage-bar).
 //
-//   node install.mjs [--no-activate] [--skip-layout] [--skip-settings] [--skip-claude] [--skip-agy]
+//   node install.mjs [--language en|ko] [--no-activate] [--skip-layout] [--skip-settings] [--skip-claude] [--skip-agy]
 //
+// --language sets the display language and is saved in install.json. Without it
+// an update keeps the saved language (Korean for installs made before 0.1.5)
+// and a new install uses English.
 // Everything is checked before the first write; a failed check changes nothing.
 // Re-running it updates an existing install in place (it never wraps a wrapper).
 import fs from "node:fs";
@@ -15,12 +18,11 @@ import { installStatusLine, checkEditable } from "./lib/settings.mjs";
 import { claudeSettingsPath, agySettingsPath } from "./lib/snapshot.mjs";
 import { readJson, writeAtomic } from "./lib/util.mjs";
 import {
-  VERSION, MIN_NODE, MODS, LAYOUT, paths, stableNode, supportedPlatform, findAgy, findCodex, findHerdrApp, herdr, shownLayout, nodeMajor,
+  VERSION, MIN_NODE, MODS, LAYOUT, paths, parseInstallArgs, existingInstall, chooseLanguage, stableNode, supportedPlatform, findAgy, findCodex, findHerdrApp, herdr, shownLayout, nodeMajor,
   isOurMod, isOurUsageHome, isOurLayout, pointStatusAtBar,
 } from "./lib/setup.mjs";
 
 const repo = path.dirname(fileURLToPath(import.meta.url));
-const args = new Set(process.argv.slice(2));
 const KNOWN = ["--no-activate", "--skip-layout", "--skip-settings", "--skip-claude", "--skip-agy"];
 const log = (m) => process.stdout.write(`${m}\n`);
 function fail(msg, hint) {
@@ -29,7 +31,9 @@ function fail(msg, hint) {
 }
 
 // ---- 1. Checks (no writes) -------------------------------------------------
-for (const a of args) if (!KNOWN.includes(a)) fail(`unknown option ${a}`, `options: ${KNOWN.join(" ")}`);
+let opts;
+try { opts = parseInstallArgs(process.argv.slice(2), KNOWN); } catch (e) { fail(e.message, `options: --language en|ko ${KNOWN.join(" ")}`); }
+const args = opts.flags;
 if (!supportedPlatform()) fail(`unsupported platform ${process.platform}`, "herdr-usage supports macOS, Linux and Windows.");
 if (Number(process.versions.node.split(".")[0]) < MIN_NODE) fail(`Node.js ${process.versions.node} is too old`, `Run it with Node.js ${MIN_NODE} or newer.`);
 
@@ -48,6 +52,7 @@ for (const m of MODS) {
 }
 if (!isOurUsageHome(P.usage)) fail(`${P.usage} exists and was not created by herdr-usage`, "Move it away, or set HERDR_USAGE_HOME to another folder.");
 const prevInfo = readJson(P.info, {}) ?? {};
+const lang = chooseLanguage({ explicit: opts.language, prevInfo, existing: existingInstall(P, prevInfo) });
 
 // statusLine plans: skip a CLI whose config folder does not exist (it is not set up here).
 const settingsPlan = [];
@@ -79,7 +84,7 @@ if (!args.has("--skip-layout")) {
 
 // Stage both mods with the paths filled in, and let herdr-app check them.
 // Forward slashes are valid Windows paths and safe inside JS and shell literals.
-const sub = (s) => s.replaceAll("@NODE@", node.replaceAll("\\", "/")).replaceAll("@USAGE_HOME@", P.usage.replaceAll("\\", "/"));
+const sub = (s) => s.replaceAll("@NODE@", node.replaceAll("\\", "/")).replaceAll("@USAGE_HOME@", P.usage.replaceAll("\\", "/")).replaceAll("@LANG@", lang.language);
 function copyTree(from, to, transform) {
   fs.mkdirSync(to, { recursive: true });
   for (const e of fs.readdirSync(from, { withFileTypes: true })) {
@@ -173,10 +178,12 @@ if (layoutPlan?.kind === "update") {
   }
 }
 if (layoutNote) log(layoutNote);
+log(`language ${lang.language} (${lang.reason}; change with: node install.mjs --language ${lang.language === "en" ? "ko" : "en"})`);
 
 writeAtomic(P.info, JSON.stringify({
   package: "herdr-usage",
   version: VERSION,
+  language: lang.language,
   node,
   herdr_app: hrd,
   codex: findCodex(),

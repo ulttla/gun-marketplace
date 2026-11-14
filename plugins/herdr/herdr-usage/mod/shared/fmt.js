@@ -1,5 +1,6 @@
 // Shared by gun-usage-bar and gun-usage-detail (the installer copies it into both).
-// Pure formatting: no host calls at module scope.
+// Pure formatting: no host calls at module scope. Text comes from i18n.js.
+import { LANG, strings, agoText, untilText, windowName } from "./i18n.js";
 
 export const NODE = "@NODE@";
 export const USAGE_HOME = "@USAGE_HOME@"; // the collector folder, filled in by the installer
@@ -13,25 +14,13 @@ export const SHARED_KEY = "gun-usage.snapshot";
 
 export const now = () => Math.floor(Date.now() / 1000);
 
-export function ago(sec, t = now()) {
-  if (!sec) return "기록 없음";
-  const d = Math.max(0, t - sec);
-  if (d < 60) return "방금";
-  if (d < 3600) return `${Math.floor(d / 60)}분 전`;
-  if (d < 86400) return `${Math.floor(d / 3600)}시간 전`;
-  return `${Math.floor(d / 86400)}일 전`;
+export function ago(sec, t = now(), lang = LANG) {
+  if (!sec) return strings(lang).never;
+  return agoText(Math.max(0, t - sec), lang);
 }
 
-export function until(sec, t = now()) {
-  const d = sec - t;
-  if (d <= 0) return "지남";
-  if (d < 3600) return `${Math.max(1, Math.round(d / 60))}분 후`;
-  if (d < 86400) {
-    const h = Math.floor(d / 3600), m = Math.floor((d % 3600) / 60);
-    return m ? `${h}시간 ${m}분 후` : `${h}시간 후`;
-  }
-  const days = Math.floor(d / 86400), h = Math.floor((d % 86400) / 3600);
-  return h ? `${days}일 ${h}시간 후` : `${days}일 후`;
+export function until(sec, t = now(), lang = LANG) {
+  return untilText(sec - t, lang);
 }
 
 const two = (n) => String(n).padStart(2, "0");
@@ -43,11 +32,12 @@ export function clock(sec, withDate = true) {
 }
 
 /** What a window can honestly show now. */
-export function windowState(w, t = now()) {
-  if (w.resets_at && w.resets_at <= t) return { kind: "expired", text: "리셋됨 · 새 값 대기" };
-  if (w.used_percent == null) return { kind: "unknown", text: "알 수 없음" };
+export function windowState(w, t = now(), lang = LANG) {
+  const L = strings(lang);
+  if (w.resets_at && w.resets_at <= t) return { kind: "expired", text: L.expired };
+  if (w.used_percent == null) return { kind: "unknown", text: L.unknown };
   const remaining = w.remaining_percent ?? 100 - w.used_percent;
-  return { kind: "ok", used: w.used_percent, remaining, text: `${fmtPct(remaining)} 남음 · ${fmtPct(w.used_percent)} 사용` };
+  return { kind: "ok", used: w.used_percent, remaining, text: L.left(fmtPct(remaining), fmtPct(w.used_percent)) };
 }
 
 /** At most one decimal, so 99.6 is never shown as 100. */
@@ -70,15 +60,14 @@ export function barColor(t, used) {
 }
 
 /** Short window labels for the bar. */
-export function shortLabel(w) {
-  const l = w.label ?? w.id;
-  return l.replace("포함 크레딧", "크레딧").replace(/(\d+)시간/, "$1h").replace("주간", "주").replace("일간", "일");
+export function shortLabel(sourceId, w, lang = LANG) {
+  return windowName(sourceId, w, lang, true);
 }
 
-export const STATUS_KO = { ok: "정상", unavailable: "대기", connect_needed: "연결 필요", error: "오류" };
+export const statusText = (status, lang = LANG) => strings(lang).status[status] ?? status;
 
-export function methodKo(m) {
-  return { "app-server": "실시간 조회", rollout: "Codex 턴 기록", statusline: "세션 수신", "device-key": "실시간 조회", "api-key": "실시간 조회", "oauth-api": "실시간 조회", "quota-api": "실시간 조회" }[m] ?? (m ?? "");
+export function methodText(m, lang = LANG) {
+  return strings(lang).method[m] ?? (m ?? "");
 }
 
 /** Newest of several snapshots (by generated_at). */

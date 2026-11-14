@@ -16,6 +16,8 @@ case "$1" in
     [ -f "$STUB_DIR/fail-check" ] && { echo "Error: stub check failed" >&2; exit 1; }
     [ -f "$2/main.js" ] || exit 1
     grep -q '@NODE@\\|@USAGE_HOME@' "$2/fmt.js" && exit 1
+    [ -f "$2/i18n.js" ] || exit 1
+    grep -q '@LANG@' "$2/i18n.js" && exit 1
     exit 0 ;;
   status)
     [ -f "$STUB_DIR/no-window" ] && { echo "no window" >&2; exit 1; }
@@ -194,6 +196,12 @@ test("setup: failed checks change nothing and exit nonzero", () => {
     ["no Herdr home", (s) => fs.rmSync(s.app, { recursive: true }), [], /Herdr home not found/],
     ["old node for the wrapper", (s) => { s.env.HERDR_USAGE_NODE = path.join(s.home, "missing-node"); }, [], /older than|missing/],
     ["unknown option", () => {}, ["--frobnicate"], /unknown option/],
+    ["unsupported language", () => {}, ["--language", "fr"], /unsupported language "fr"/],
+    ["language without a value", () => {}, ["--language"], /needs a value/],
+    ["language followed by a flag", () => {}, ["--language", "--no-activate"], /needs a value/],
+    ["empty --language=", () => {}, ["--language="], /unsupported language ""/],
+    ["language given twice", () => {}, ["--language", "en", "--language=ko"], /more than once/],
+    ["bare value without --language", () => {}, ["ko"], /unknown option ko/],
     ["unsupported platform", (s) => { const f = path.join(s.stubDir, "freebsd.mjs"); fs.writeFileSync(f, 'Object.defineProperty(process, "platform", { value: "freebsd" });\n'); s.env.NODE_OPTIONS = `--import=${f}`; }, [], /unsupported platform freebsd/],
   ];
   for (const [name, setup, args, re] of cases) {
@@ -269,4 +277,78 @@ test("installer records the Antigravity executable for a shell-free Herdr launch
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(read(path.join(s.usage, "install.json"))).agy, agy);
   } finally { fs.rmSync(s.home, { recursive: true, force: true }); }
+});
+
+// ---- display language -------------------------------------------------------
+const info = (s) => JSON.parse(read(path.join(s.usage, "install.json")));
+const baked = (s) => MODS_DIRS.map((m) => read(path.join(s.app, "mods", m, "i18n.js")).match(/const BAKED = "([^"]*)"/)?.[1]);
+const MODS_DIRS = ["gun-usage-bar", "gun-usage-detail"];
+
+test("language: new installs use English; --language switches and is kept by later updates", () => {
+  const s = sandbox();
+  const r1 = run(s, "install.mjs");
+  assert.equal(r1.status, 0, r1.stderr);
+  assert.equal(info(s).language, "en");
+  assert.deepEqual(baked(s), ["en", "en"], "both mods get the language");
+  assert.match(r1.stdout, /language en \(default for new installs/);
+  assert.equal(JSON.parse(run(s, "status.mjs", ["--json"]).stdout).language, "en");
+  assert.match(run(s, "status.mjs").stdout, /language: {4}en/);
+
+  const r2 = run(s, "install.mjs", ["--language", "ko"]);
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.equal(info(s).language, "ko");
+  assert.deepEqual(baked(s), ["ko", "ko"]);
+
+  const r3 = run(s, "install.mjs");
+  assert.equal(r3.status, 0, r3.stderr);
+  assert.equal(info(s).language, "ko", "an update without --language keeps the saved language");
+  assert.match(r3.stdout, /language ko \(saved/);
+
+  const r4 = run(s, "install.mjs", ["--no-activate", "--language=en"]);
+  assert.equal(r4.status, 0, r4.stderr);
+  assert.deepEqual([info(s).language, ...baked(s)], ["en", "en", "en"]);
+
+  // A rejected option on an existing install leaves it exactly as it was.
+  const before = tree(s.home);
+  const bad = run(s, "install.mjs", ["--language", "de"]);
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /Nothing was changed/);
+  assert.deepEqual(tree(s.home), before);
+});
+
+test("language: installs made before 0.1.5 keep Korean; a full uninstall starts fresh in English", () => {
+  // 0.1.4 install.json (no language field).
+  const s = sandbox();
+  assert.equal(run(s, "install.mjs").status, 0);
+  const old = info(s); delete old.language; old.version = "0.1.4";
+  fs.writeFileSync(path.join(s.usage, "install.json"), JSON.stringify(old, null, 2) + "\n");
+  let r = run(s, "install.mjs");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([info(s).language, ...baked(s)], ["ko", "ko", "ko"]);
+  assert.match(r.stdout, /language ko \(kept from an earlier install/);
+
+  // Before install.json existed: recognized by the collector and wrapper it shipped.
+  fs.rmSync(path.join(s.usage, "install.json"));
+  r = run(s, "install.mjs");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(info(s).language, "ko");
+
+  // An explicit choice still wins on a legacy install.
+  fs.rmSync(path.join(s.usage, "install.json"));
+  r = run(s, "install.mjs", ["--language", "en"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(info(s).language, "en");
+
+  assert.equal(run(s, "uninstall.mjs").status, 0);
+  r = run(s, "install.mjs");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(info(s).language, "en", "nothing left of the old install: English");
+
+  // Only the mods are left (the usage folder was removed by hand): still an earlier install.
+  const m = sandbox({ claude: false, agy: false });
+  assert.equal(run(m, "install.mjs").status, 0);
+  fs.rmSync(m.usage, { recursive: true });
+  r = run(m, "install.mjs");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(info(m).language, "ko");
 });

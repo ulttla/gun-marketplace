@@ -35,12 +35,12 @@ jobs:
       - name: Syntax of the mods
         working-directory: plugins/herdr/herdr-usage
         shell: bash
-        run: for f in mod/*/main.js mod/shared/fmt.js; do node --check "$f"; done
+        run: for f in mod/*/main.js mod/shared/*.js; do node --check "$f"; done
       - name: Tests (synthetic fixtures, temporary HOME, stub herdr-app; no credentials or network)
         if: runner.os != 'Windows'
         working-directory: plugins/herdr/herdr-usage
         run: node --test test/*.test.mjs
-      - name: Windows parsers and native statusline wrapper
+      - name: Windows parsers, display language and native statusline wrapper
         if: runner.os == 'Windows'
         working-directory: plugins/herdr/herdr-usage
-        run: node --test test/parse.test.mjs test/windows.test.mjs test/claude.test.mjs test/agy.test.mjs test/account-source.test.mjs
+        run: node --test test/parse.test.mjs test/windows.test.mjs test/claude.test.mjs test/agy.test.mjs test/account-source.test.mjs test/i18n.test.mjs

@@ -6,11 +6,12 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { appHomeDir, usageHome, readJson } from "./util.mjs";
 
-export const VERSION = "0.1.4";
+export const VERSION = "0.1.5";
 export const MIN_NODE = 22;
 export const MODS = ["gun-usage-bar", "gun-usage-detail"];
 export const LAYOUT = "gun-usage";
 export const BAR = "gun-usage-bar";
+export const LANGUAGES = ["en", "ko"];
 const SHARED_MARK = 'SHARED_KEY = "gun-usage.snapshot"';
 
 export function paths() {
@@ -113,6 +114,49 @@ export function isOurUsageHome(dir) {
   const has = (rel, text) => { try { return fs.readFileSync(path.join(dir, rel), "utf8").includes(text); } catch { return false; } };
   return has("bin/herdr-usage", "usage: herdr-usage snapshot [--due|--refresh|--cached] | capture <claude|agy>")
     && has("bin/statusline-wrap", '"$home/bin/herdr-usage" capture "$src"');
+}
+
+/** Installer options, read in order: flags from `known`, plus --language en|ko
+ *  (or --language=en|ko). Throws an Error with a short message on anything else. */
+export function parseInstallArgs(argv, known) {
+  const flags = new Set();
+  let language = null;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    let value;
+    if (a === "--language") {
+      value = argv[i + 1];
+      if (value == null || value.startsWith("-")) throw new Error("--language needs a value (en or ko)");
+      i++;
+    } else if (a.startsWith("--language=")) {
+      value = a.slice("--language=".length);
+    } else if (known.includes(a)) {
+      flags.add(a);
+      continue;
+    } else {
+      throw new Error(`unknown option ${a}`);
+    }
+    if (!LANGUAGES.includes(value)) throw new Error(`unsupported language "${value}" (use en or ko)`);
+    if (language != null) throw new Error("--language was given more than once");
+    language = value;
+  }
+  return { flags, language };
+}
+
+/** An install of this package is already here (also ones made before install.json existed). */
+export function existingInstall(P, prevInfo) {
+  return prevInfo?.package === "herdr-usage"
+    || fs.existsSync(path.join(P.usage, "bin", "herdr-usage"))
+    || MODS.some((m) => isOurMod(path.join(P.mods, m)));
+}
+
+/** The display language: the option, else the saved one, else Korean for an
+ *  install made before 0.1.5 (its interface was Korean), else English. */
+export function chooseLanguage({ explicit, prevInfo, existing }) {
+  if (explicit) return { language: explicit, reason: "option" };
+  if (existing && LANGUAGES.includes(prevInfo?.language)) return { language: prevInfo.language, reason: "saved" };
+  if (existing) return { language: "ko", reason: "kept from an earlier install" };
+  return { language: "en", reason: "default for new installs" };
 }
 
 /** Points a layout's status block at the bar. Returns true when one was found. */

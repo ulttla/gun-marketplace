@@ -11,7 +11,7 @@ Plugins that connect Claude Code to [herdr](https://herdr.dev), the terminal and
 | Plugin | What it does |
 | :- | :- |
 | [`herdr-bg-status`](herdr-bg-status) | Keeps a Claude Code session shown as **working** in herdr while its background work still runs after the turn ends |
-| [`herdr-usage`](herdr-usage) | Shows Codex, Claude Code, Antigravity and Ollama Cloud subscription usage in the Herdr app's status bar, with a detail popup |
+| [`herdr-usage`](herdr-usage) | Shows Codex, Claude Code, Antigravity and Ollama Cloud subscription usage in the Herdr app's status bar, with a detail popup. English or Korean interface |
 | [`herdr-files`](herdr-files) | A Files panel for the Herdr app that goes to parent and other folders and edits local Markdown and text files with an explicit, conflict-guarded Save |
 
 ### herdr-bg-status
@@ -84,7 +84,7 @@ Then ask the agent to install herdr-files. Requirements, what it changes, limits
 | 플러그인 | 하는 일 |
 | :- | :- |
 | [`herdr-bg-status`](herdr-bg-status) | 턴이 끝난 뒤에도 백그라운드 작업이 돌고 있으면 herdr에서 Claude Code 세션을 **working**으로 계속 보여 줍니다 |
-| [`herdr-usage`](herdr-usage) | Codex, Claude Code, Antigravity, Ollama Cloud 구독 사용량을 Herdr 앱 하단 바와 상세 팝업에 보여 줍니다 |
+| [`herdr-usage`](herdr-usage) | Codex, Claude Code, Antigravity, Ollama Cloud 구독 사용량을 Herdr 앱 하단 바와 상세 팝업에 보여 줍니다. 화면은 영어나 한국어 |
 | [`herdr-files`](herdr-files) | Herdr 앱 Files 패널에서 상위·다른 폴더로 이동하고, 로컬 Markdown·텍스트 파일을 편집해 확인을 거쳐 저장합니다 |
 
 ### herdr-bg-status

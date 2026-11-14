@@ -4,7 +4,12 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { spaces, agents, theme, run, window, keys, exec, readTextFile, openOverlay, shared, setShared, focused, panes, nextCommand } from "herdr";
-import { NODE, USAGE_HOME, SOURCES, SHARED_KEY, now, windowState, fmtPct, usedColor, shortLabel, isStale, newest, focusedContext } from "./fmt.js";
+import { NODE, USAGE_HOME, SOURCES, SHARED_KEY, now, windowState, fmtPct, usedColor, shortLabel, statusText, isStale, newest, focusedContext } from "./fmt.js";
+import { LANG, strings, windowName } from "./i18n.js";
+
+const L = strings();
+// English copy is wider, so the bar keeps every window name only from a wider width.
+const FULL_W = LANG === "ko" ? 980 : 1100;
 
 export default class GunUsageBar extends View {
   init(_props, cx) {
@@ -68,7 +73,7 @@ export default class GunUsageBar extends View {
     const row = () => h_flex().id(`chip-${src.id}`).gap(5).items_center().flex_none();
     if (!s || !windows.length) {
       if (mode === "tiny") return null;
-      const text = s?.status === "connect_needed" ? "연결 필요" : s?.status === "error" ? "오류" : "대기";
+      const text = statusText(s?.status === "connect_needed" || s?.status === "error" ? s.status : "unavailable");
       return row().child(this.icon(src, t, true)).child(div().text_color(t.dim).child(mode === "full" ? `${src.name} ${text}` : text));
     }
     const stale = isStale(s.observed_at, s.stale_after_s, n);
@@ -79,9 +84,9 @@ export default class GunUsageBar extends View {
       .when(mode === "full", (el) => el.child(div().text_color(stale ? t.dim : t.muted).child(src.name)))
       .children(shown.map(({ w, st }) => {
       const color = stale ? t.dim : st.kind === "ok" ? usedColor(t, st.used) : t.dim;
-      const val = st.kind === "ok" ? fmtPct(st.remaining) : st.kind === "expired" ? "리셋됨" : "?";
+      const val = st.kind === "ok" ? fmtPct(st.remaining) : st.kind === "expired" ? L.expiredShort : "?";
       return h_flex().gap(3).items_center()
-        .child(div().text_color(t.dim).child(mode !== "full" ? shortLabel(w) : many ? `${w.label ?? w.id} 남음 (최저)` : `${w.label ?? w.id} 남음`))
+        .child(div().text_color(t.dim).child(mode !== "full" ? shortLabel(src.id, w) : many ? L.labelLeftLowest(windowName(src.id, w)) : L.labelLeft(windowName(src.id, w))))
         .child(div().text_color(color).child(val));
     }));
   }
@@ -92,18 +97,18 @@ export default class GunUsageBar extends View {
     const list = agents();
     const needs = list.filter((a) => a.status === "blocked").length;
     const w = this.width;
-    const mode = w >= 980 ? "full" : w >= 620 ? "compact" : "tiny";
+    const mode = w >= FULL_W ? "full" : w >= 620 ? "compact" : "tiny";
     const label = (icon, text) => h_flex().gap(6).items_center().flex_none().child(svg(`mods/workspace-chrome/${icon}.svg`).size(13)).child(text);
     const snap = newest(this.snap, shared(SHARED_KEY));
     const ctx = focusedContext(snap, focused(), panes());
 
     const items = [];
     if (ctx && mode !== "tiny") {
-      items.push(h_flex().gap(4).items_center().child(div().text_color(t.dim).child(mode === "full" ? "컨텍스트" : "ctx"))
+      items.push(h_flex().gap(4).items_center().child(div().text_color(t.dim).child(mode === "full" ? L.context : "ctx"))
         .child(div().text_color(usedColor(t, ctx.used_percent)).child(fmtPct(ctx.used_percent))));
       items.push(div().w(1).h(12).bg(t.border));
     }
-    if (!snap) items.push(div().text_color(t.dim).child(this.busy ? "사용량 불러오는 중…" : "사용량 대기"));
+    if (!snap) items.push(div().text_color(t.dim).child(this.busy ? L.loading : L.waitingUsage));
     else for (const src of SOURCES) { const c = this.chip(src, snap.sources?.[src.id], t, mode); if (c) items.push(c); }
     const usage = h_flex().id("usage").gap(mode === "full" ? 14 : 10).items_center().flex_none().cursor_pointer()
       .px(8).h(22).rounded(6).hover((s) => s.bg(t.hover))
