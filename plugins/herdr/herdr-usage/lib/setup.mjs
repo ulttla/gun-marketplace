@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { appHomeDir, usageHome, readJson } from "./util.mjs";
 
-export const VERSION = "0.1.3";
+export const VERSION = "0.1.4";
 export const MIN_NODE = 22;
 export const MODS = ["gun-usage-bar", "gun-usage-detail"];
 export const LAYOUT = "gun-usage";
@@ -32,6 +32,15 @@ export function which(name) {
     for (const n of names) if (dir && isExec(path.join(dir, n))) return path.join(dir, n);
   }
   return null;
+}
+
+/** Find the native quota CLI even when Herdr has no interactive shell PATH. */
+export function findAgy() {
+  if (process.env.HERDR_USAGE_AGY) return process.env.HERDR_USAGE_AGY;
+  return which("agy") ?? [
+    path.join(os.homedir(), ".local", "bin", process.platform === "win32" ? "agy.exe" : "agy"),
+    ...(process.platform === "win32" ? [path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "agy", "bin", "agy.exe")] : []),
+  ].find(isExec) ?? null;
 }
 
 /** Prefer the native Windows executable: .cmd/.ps1 launchers need a shell. */

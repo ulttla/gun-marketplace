@@ -15,7 +15,7 @@ import { installStatusLine, checkEditable } from "./lib/settings.mjs";
 import { claudeSettingsPath, agySettingsPath } from "./lib/snapshot.mjs";
 import { readJson, writeAtomic } from "./lib/util.mjs";
 import {
-  VERSION, MIN_NODE, MODS, LAYOUT, paths, stableNode, supportedPlatform, findCodex, findHerdrApp, herdr, shownLayout, nodeMajor,
+  VERSION, MIN_NODE, MODS, LAYOUT, paths, stableNode, supportedPlatform, findAgy, findCodex, findHerdrApp, herdr, shownLayout, nodeMajor,
   isOurMod, isOurUsageHome, isOurLayout, pointStatusAtBar,
 } from "./lib/setup.mjs";
 
@@ -180,6 +180,7 @@ writeAtomic(P.info, JSON.stringify({
   node,
   herdr_app: hrd,
   codex: findCodex(),
+  agy: findAgy(),
   codex_home: process.env.CODEX_HOME || prevInfo.codex_home || null,
   settings,
   layout: layoutPlan ? LAYOUT : prevInfo.layout ?? null,

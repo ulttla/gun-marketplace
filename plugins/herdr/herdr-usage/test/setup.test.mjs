@@ -259,3 +259,14 @@ test("setup: the baked Node is a stable launcher on PATH that resolves to the ru
   assert.equal(run(s2, "install.mjs").status, 0);
   assert.equal(JSON.parse(read(path.join(s2.usage, "install.json"))).node, process.execPath);
 });
+
+test("installer records the Antigravity executable for a shell-free Herdr launch", () => {
+  const s = sandbox();
+  try {
+    const agy = path.join(s.home, "agy custom");
+    fs.writeFileSync(agy, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const result = run(s, "install.mjs", [], { HERDR_USAGE_AGY: agy });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(read(path.join(s.usage, "install.json"))).agy, agy);
+  } finally { fs.rmSync(s.home, { recursive: true, force: true }); }
+});

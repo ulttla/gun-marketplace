@@ -50,3 +50,14 @@ test("expired login and missing helper fail honestly", async () => {
   assert.equal(r.last_error, "quota_command_failed");
   assert.ok(!JSON.stringify(r).includes("secret data"));
 });
+
+test("reads quota without a conversation on the current platform", async () => {
+  let reads = 0;
+  const r = await collectAgy({ now: () => 123, read: async () => {
+    reads++;
+    return response([{ id: "gemini-weekly", remaining_fraction: 0.5 }]);
+  } });
+  assert.equal(reads, 1);
+  assert.equal(r.status, "ok");
+  assert.equal(r.groups[0].windows[0].remaining_percent, 50);
+});
