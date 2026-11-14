@@ -33,7 +33,9 @@ test("Windows: install, wrapper pass-through, update, restore in isolated home",
   fs.writeFileSync(claude, original);
   fs.writeFileSync(agy, '{}\n');
   const env = { ...process.env, HERDR_APP_HOME: app, HERDR_USAGE_HOME: usage, HERDR_USAGE_CLAUDE_SETTINGS: claude, HERDR_USAGE_AGY_SETTINGS: agy };
-  const run = (name) => spawnSync(process.execPath, [path.join(repo, name), "--no-activate"], { env, encoding: "utf8", windowsHide: true });
+  const run = (name, ...args) => spawnSync(process.execPath, [path.join(repo, name), "--no-activate", ...args], { env, encoding: "utf8", windowsHide: true });
+  const language = () => [JSON.parse(fs.readFileSync(path.join(usage, "install.json"), "utf8")).language,
+    ...["gun-usage-bar", "gun-usage-detail"].map((m) => fs.readFileSync(path.join(app, "mods", m, "i18n.js"), "utf8").match(/const BAKED = "([^"]*)"/)?.[1])];
   try {
     const installed = run("install.mjs");
     assert.equal(installed.status, 0, installed.stdout + installed.stderr);
@@ -47,8 +49,13 @@ test("Windows: install, wrapper pass-through, update, restore in isolated home",
     assert.equal(wrapped.stdout, input.toString());
     assert.equal(wrapped.stderr, "original-stderr");
     assert.ok(fs.readdirSync(path.join(usage, "cache/captures")).some(n => n.startsWith("claude-")));
-    const second = run("install.mjs");
+    assert.deepEqual(language(), ["en", "en", "en"], "new install: English");
+    const second = run("install.mjs", "--language", "ko");
     assert.equal(second.status, 0, second.stderr);
+    assert.deepEqual(language(), ["ko", "ko", "ko"], "--language switches an existing install");
+    const third = run("install.mjs");
+    assert.equal(third.status, 0, third.stderr);
+    assert.deepEqual(language(), ["ko", "ko", "ko"], "an update keeps the saved language");
     assert.deepEqual(JSON.parse(fs.readFileSync(claude)).statusLine, sl);
     // Restore directly: no interaction with the running window or its layout.
     for (const [src, file] of [["claude", claude], ["agy", agy]]) {

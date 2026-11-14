@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import os from "node:os";
 import { installInfo, readJson, writeAtomic, hash, nowS, windowOf } from "../util.mjs";
+import { msg } from "../messages.mjs";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
@@ -66,7 +67,7 @@ export function retryAt(response, now = nowS()) {
 function failure(status, response) {
   const auth = status === 401 || status === 403;
   return { status: auth ? "connect_needed" : "error", method: "oauth-api", groups: [],
-    message_ko: auth ? "Claude 로그인 갱신 필요" : status === 429 ? "Claude 조회 제한 · 잠시 후 재시도" : "Claude 사용량 조회 실패",
+    ...msg([auth ? "claude_auth" : status === 429 ? "claude_rate_limited" : "claude_failed"]),
     last_error: `http ${status}`, retry_until: status === 429 ? retryAt(response) : null };
 }
 
@@ -127,11 +128,11 @@ export async function collectClaude({ settingsPath, fetcher = fetch, login = cla
     }
     if (!res.ok) return failure(res.status, res);
     const groups = groupsFromUsage(await res.json(), { dir: path.dirname(file), plan: oauth.subscriptionType });
-    if (!groups.length) return { status: "error", method: "oauth-api", groups: [], message_ko: "Claude 사용량 응답이 비어 있음", last_error: "empty" };
-    return { status: "ok", method: "oauth-api", groups, message_ko: "실시간 조회", last_error: null };
+    if (!groups.length) return { status: "error", method: "oauth-api", groups: [], ...msg(["claude_empty"]), last_error: "empty" };
+    return { status: "ok", method: "oauth-api", groups, ...msg(["live"]), last_error: null };
   } catch (e) {
     // Error text and API bodies can contain credentials. Only fixed codes escape.
     const code = ["refresh_busy", "refresh_invalid", "credentials_missing"].includes(e?.message) ? e.message : e?.name === "TimeoutError" ? "timeout" : "network_error";
-    return { status: "error", method: "oauth-api", groups: [], message_ko: "Claude 사용량 조회 실패", last_error: code };
+    return { status: "error", method: "oauth-api", groups: [], ...msg(["claude_failed"]), last_error: code };
   }
 }

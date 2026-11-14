@@ -24,9 +24,11 @@ node <root>/install.mjs
 
 The same command updates an existing install in place: it keeps the shown layout, the saved original statuslines and the captured data, and never wraps a wrapper twice. After a plugin update, run it from the new plugin root.
 
-Options: `--no-activate`, `--skip-layout`, `--skip-settings`, `--skip-claude`, `--skip-agy`. Environment: `HERDR_APP_BIN` (path to `herdr-app`), `HERDR_USAGE_NODE` (the Node.js the statusline and Herdr will run; by default a `node` on `PATH` that resolves to the Node.js running the installer, so a Homebrew upgrade does not break it, else that Node.js itself), `HERDR_APP_HOME`, `CLAUDE_CONFIG_DIR`.
+Options: `--language en|ko`, `--no-activate`, `--skip-layout`, `--skip-settings`, `--skip-claude`, `--skip-agy`. Environment: `HERDR_APP_BIN` (path to `herdr-app`), `HERDR_USAGE_NODE` (the Node.js the statusline and Herdr will run; by default a `node` on `PATH` that resolves to the Node.js running the installer, so a Homebrew upgrade does not break it, else that Node.js itself), `HERDR_APP_HOME`, `CLAUDE_CONFIG_DIR`.
 
 If no Herdr window is running (the installer says so), use `--no-activate`; the person can show the layout later.
+
+Display language: the bar and popup are in English or Korean. A new install uses English; an update keeps the saved language (Korean for installs made before 0.1.5). Pass `--language ko` or `--language en` only when the person asks for a language; it switches an existing install too and is saved in `<Herdr home>/usage/install.json`. To switch later, run the installer again with the other value (with `--no-activate` if the person does not want the layout shown).
 
 Every check runs before the first write. On a nonzero exit, show the message: it says what to fix, and whether anything changed. Do not delete or rename the person's files to get past a check: a name collision with a mod, layout or `usage` folder that is not herdr-usage's is the person's to resolve.
 
@@ -38,7 +40,7 @@ The first snapshot is collected when Herdr draws the bar, so `status.mjs` may sa
 node <root>/status.mjs          # add --json for machine-readable output
 ```
 
-It reports which parts are installed, which statusLines are wrapped, the shown layout and each source's state (`ok`, `unavailable`, `connect_needed`, `error`). It prints no usage numbers or settings content, and exits 1 when herdr-usage is not installed. For a mod error, run `herdr-app check <Herdr home>/mods/gun-usage-bar` and `herdr-app status`.
+It reports the display language, which parts are installed, which statusLines are wrapped, the shown layout and each source's state (`ok`, `unavailable`, `connect_needed`, `error`). It prints no usage numbers or settings content, and exits 1 when herdr-usage is not installed. For a mod error, run `herdr-app check <Herdr home>/mods/gun-usage-bar` and `herdr-app status`.
 
 ## Uninstall
 

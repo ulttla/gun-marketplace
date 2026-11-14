@@ -12,7 +12,7 @@ Subscription usage for Codex, Claude Code, Antigravity (agy) and Ollama Cloud in
 
 ## English
 
-The status bar keeps everything Herdr's own `workspace-status` shows (machine, branch, agents count, "needs you", the palette hint) and adds how much of each usage window is left, on the right. Click it, or run `herdr-app do gun-usage-bar.open`, for a popup with every window: remaining and used percent, the reset time, when the value was observed, and a manual refresh (`r`). The interface text is in Korean.
+The status bar keeps everything Herdr's own `workspace-status` shows (machine, branch, agents count, "needs you", the palette hint) and adds how much of each usage window is left, on the right. Click it, or run `herdr-app do gun-usage-bar.open`, for a popup with every window: remaining and used percent, the reset time, when the value was observed, and a manual refresh (`r`). The interface is in English or Korean; see [Language](#language).
 
 With the usage bar open, quota refreshes automatically every 5 minutes, including Antigravity on macOS, Linux and Windows; no conversation is needed.
 
@@ -44,6 +44,7 @@ Or run the installer yourself from a checkout or the installed plugin folder:
 ```bash
 node install.mjs                 # collector, both mods, statusLine wrappers, gun-usage layout (shown)
 node install.mjs --no-activate   # the same, without switching layouts (no running window needed)
+node install.mjs --language ko   # the same, with the interface in Korean (en or ko)
 node status.mjs                  # what is installed, and each source's state (exits 1 if not installed)
 ```
 
@@ -51,7 +52,7 @@ If no Herdr window is running, use `--no-activate`. The first snapshot is collec
 
 Other options: `--skip-layout`, `--skip-settings`, `--skip-claude`, `--skip-agy`.
 
-The installer checks everything before its first write: platform, Node.js, the Herdr home, `herdr-app`, name collisions, each settings file, Herdr's main layout, a running window (unless `--no-activate`), and `herdr-app check` on both mods with their paths filled in. If a check fails it exits nonzero, says what to fix, and changes nothing. A mod, layout or `usage` folder of the same name that herdr-usage did not create is never overwritten.
+The installer checks everything before its first write: its options (an unknown option or a `--language` other than `en` or `ko`), platform, Node.js, the Herdr home, `herdr-app`, name collisions, each settings file, Herdr's main layout, a running window (unless `--no-activate`), and `herdr-app check` on both mods with their paths filled in. If a check fails it exits nonzero, says what to fix, and changes nothing. A mod, layout or `usage` folder of the same name that herdr-usage did not create is never overwritten.
 
 Environment it follows:
 
@@ -66,7 +67,19 @@ Environment it follows:
 
 On Windows, the installer finds native `.exe` programs, including the standard native and npm Codex installations. For a custom Codex location, set `HERDR_USAGE_CODEX` to its absolute `codex.exe` path; `.cmd` and `.ps1` launchers are not supported. Windows uses a Node.js statusline wrapper and terminates only the temporary app-server process tree. See [Windows setup](WINDOWS.md).
 
-The settings files, `node`, `codex` and `CODEX_HOME` found at install time are recorded in `<Herdr home>/usage/install.json`, because Herdr runs the collector without your shell environment.
+The settings files, `node`, `codex` and `CODEX_HOME` found at install time are recorded in `<Herdr home>/usage/install.json`, because Herdr runs the collector without your shell environment. The display language is recorded there too.
+
+### Language
+
+The bar and the popup are in English or Korean, chosen when you run the installer:
+
+- `--language en` or `--language ko` (also `--language=ko`) sets it, on a new install or an existing one, and saves it in `install.json`.
+- Without the option, an update keeps the saved language. Installs made before 0.1.5 (whose interface was Korean) stay in Korean.
+- A new install, or one after a full uninstall, uses English.
+
+To switch later, run the installer again with the other value, for example `node install.mjs --no-activate --language en`; Herdr reloads the mods in place. `node status.mjs` shows the current language.
+
+Data already collected shows in the new language right away, including values saved by earlier versions. Names that come from a service or from you are shown as they are: Codex limit names, Claude config folder names, and quota bucket ids the installer does not recognize.
 
 ### Update
 
@@ -77,7 +90,7 @@ claude plugin marketplace update gun-marketplace && claude plugin update herdr-u
 codex plugin marketplace upgrade gun-marketplace && codex plugin add herdr-usage@gun-marketplace
 ```
 
-A re-run updates in place. It keeps the layout you have shown, your edits to the `gun-usage` layout, the saved original statuslines and the captured data, and never wraps a wrapper twice.
+A re-run updates in place. It keeps the display language, the layout you have shown, your edits to the `gun-usage` layout, the saved original statuslines and the captured data, and never wraps a wrapper twice.
 
 ### What changes
 
@@ -97,15 +110,15 @@ A CLI whose config folder does not exist is skipped. If the folder exists but `s
 
 | Source | How | Shown as |
 | :- | :- | :- |
-| Codex | A short-lived `codex app-server` runs `account/rateLimits/read` (15 s limit; its process group is killed afterwards). If that fails, the newest `rate_limits` event in recent `$CODEX_HOME/sessions` rollouts, with the event's own time | 실시간 조회 / Codex 턴 기록 |
-| Claude Code | Existing local OAuth login (macOS Keychain or credential file) queries subscription usage directly; statusline captures remain a fallback and provide context | 실시간 조회 / 세션 수신 |
-| Antigravity | The CLI's read-only `-p /usage --output-format json` refreshes quota without an agent turn; statusline captures remain a fallback | 실시간 조회 / 세션 수신 |
-| Ollama Cloud | `GET ollama.com/api/balance`, signed with the device key `~/.ollama/id_ed25519`, or `OLLAMA_API_KEY` as a Bearer token | 실시간 조회 |
-| Ollama local | HTTP only: `127.0.0.1:11434/api/version` and `/api/ps`. The `ollama` CLI is never run | 로컬 실행 중 / 꺼짐 |
+| Codex | A short-lived `codex app-server` runs `account/rateLimits/read` (15 s limit; its process group is killed afterwards). If that fails, the newest `rate_limits` event in recent `$CODEX_HOME/sessions` rollouts, with the event's own time | Live query / Codex turn log |
+| Claude Code | Existing local OAuth login (macOS Keychain or credential file) queries subscription usage directly; statusline captures remain a fallback and provide context | Live query / Session data |
+| Antigravity | The CLI's read-only `-p /usage --output-format json` refreshes quota without an agent turn; statusline captures remain a fallback | Live query / Session data |
+| Ollama Cloud | `GET ollama.com/api/balance`, signed with the device key `~/.ollama/id_ed25519`, or `OLLAMA_API_KEY` as a Bearer token | Live query |
+| Ollama local | HTTP only: `127.0.0.1:11434/api/version` and `/api/ps`. The `ollama` CLI is never run | Local running / Local stopped |
 
 Rules it keeps:
 
-- A missing window is unknown, never 0% or 100%. A window whose reset time has passed shows `리셋됨 · 새 값 대기` instead of the old value.
+- A missing window is unknown, never 0% or 100%. A window whose reset time has passed shows `Reset · awaiting data` (Korean: `리셋됨 · 새 값 대기`) instead of the old value.
 - A statusline re-run that repeats the same values does not make old data look fresh. Sessions on the same account merge so an idle older session cannot pull usage backwards.
 - A failed poll keeps the last good values with their original time. Network sources are read at most every 5 minutes; a manual refresh at most once a minute; a 429 `Retry-After` is honored.
 - The context row shows only for the focused terminal running Claude Code or agy. Codex context is not shown.
@@ -135,7 +148,7 @@ You can always switch back to Herdr's layout with `ctrl-shift-l` or `herdr-app d
 node --test test/*.test.mjs
 ```
 
-On macOS/Linux, run the command above. On Windows run `node --test test/parse.test.mjs test/windows.test.mjs`. CI runs synthetic parser and native-wrapper tests on Windows; the additional isolated installer integration test runs when `herdr-app` is installed. Tests use temporary settings, not real credentials or network. The Unix shell-based setup suites remain on macOS/Linux.
+On macOS/Linux, run the command above. On Windows run `node --test test/parse.test.mjs test/windows.test.mjs test/claude.test.mjs test/agy.test.mjs test/account-source.test.mjs test/i18n.test.mjs`. CI runs the synthetic parser, display-language and native-wrapper tests on Windows; the additional isolated installer integration test runs when `herdr-app` is installed. Tests use temporary settings, not real credentials or network. The Unix shell-based setup suites remain on macOS/Linux.
 
 ### License
 
@@ -145,7 +158,7 @@ On macOS/Linux, run the command above. On Windows run `node --test test/parse.te
 
 ## 한국어
 
-하단 바는 Herdr 기본 `workspace-status`가 보여 주는 것(기기, 브랜치, 에이전트 수, "needs you", 명령 팔레트 안내)을 그대로 두고, 오른쪽에 사용량 창마다 남은 비율을 더합니다. 클릭하거나 `herdr-app do gun-usage-bar.open`을 실행하면 모든 창의 남은·사용 비율, 리셋 시각, 값을 받은 시각과 수동 새로고침(`r`)이 있는 팝업이 열립니다. 화면 문구는 한국어입니다.
+하단 바는 Herdr 기본 `workspace-status`가 보여 주는 것(기기, 브랜치, 에이전트 수, "needs you", 명령 팔레트 안내)을 그대로 두고, 오른쪽에 사용량 창마다 남은 비율을 더합니다. 클릭하거나 `herdr-app do gun-usage-bar.open`을 실행하면 모든 창의 남은·사용 비율, 리셋 시각, 값을 받은 시각과 수동 새로고침(`r`)이 있는 팝업이 열립니다. 화면 문구는 영어나 한국어입니다([표시 언어](#표시-언어) 참고).
 
 데몬, launchd 작업, 모델 호출, 새 API 키가 없습니다. npm 패키지도 필요 없습니다.
 
@@ -175,6 +188,7 @@ codex plugin add herdr-usage@gun-marketplace
 ```bash
 node install.mjs                 # 수집기, mod 두 개, statusLine 래퍼, gun-usage 레이아웃(표시)
 node install.mjs --no-activate   # 같지만 레이아웃을 바꾸지 않음(창이 떠 있지 않아도 됨)
+node install.mjs --language ko   # 같지만 화면 문구를 한국어로(en 또는 ko)
 node status.mjs                  # 설치 상태와 소스별 상태(설치되지 않았으면 1로 종료)
 ```
 
@@ -182,9 +196,21 @@ Herdr 창이 떠 있지 않으면 `--no-activate`를 씁니다. 첫 수집은 He
 
 다른 옵션: `--skip-layout`, `--skip-settings`, `--skip-claude`, `--skip-agy`
 
-설치기는 처음 쓰기 전에 모두 확인합니다: 플랫폼, Node.js, Herdr 홈, `herdr-app`, 이름 충돌, 각 설정 파일, Herdr main 레이아웃, 실행 중인 창(`--no-activate`가 아니면), 경로를 채운 두 mod의 `herdr-app check`. 하나라도 실패하면 0이 아닌 코드로 끝나고, 고칠 것을 알려 주며, 아무것도 바꾸지 않습니다. herdr-usage가 만들지 않은 같은 이름의 mod, 레이아웃, `usage` 폴더는 덮어쓰지 않습니다.
+설치기는 처음 쓰기 전에 모두 확인합니다: 옵션(모르는 옵션이나 `en`·`ko`가 아닌 `--language`), 플랫폼, Node.js, Herdr 홈, `herdr-app`, 이름 충돌, 각 설정 파일, Herdr main 레이아웃, 실행 중인 창(`--no-activate`가 아니면), 경로를 채운 두 mod의 `herdr-app check`. 하나라도 실패하면 0이 아닌 코드로 끝나고, 고칠 것을 알려 주며, 아무것도 바꾸지 않습니다. herdr-usage가 만들지 않은 같은 이름의 mod, 레이아웃, `usage` 폴더는 덮어쓰지 않습니다.
 
-따르는 환경 변수는 영어 절의 표와 같습니다(`HERDR_APP_HOME`, `HERDR_APP_BIN`, `HERDR_USAGE_NODE`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HERDR_USAGE_HOME`). `HERDR_USAGE_NODE`가 없으면 설치기를 실행한 Node.js와 같은 실체를 가리키는 `PATH`의 `node`(또는 `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`)를 씁니다. 그래서 Homebrew로 Node.js를 올려도 깨지지 않습니다. Herdr는 셸 환경 없이 수집기를 실행하므로, 설치 때 찾은 설정 파일, `node`, `codex`, `CODEX_HOME`을 `<Herdr 홈>/usage/install.json`에 기록합니다.
+따르는 환경 변수는 영어 절의 표와 같습니다(`HERDR_APP_HOME`, `HERDR_APP_BIN`, `HERDR_USAGE_NODE`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HERDR_USAGE_HOME`). `HERDR_USAGE_NODE`가 없으면 설치기를 실행한 Node.js와 같은 실체를 가리키는 `PATH`의 `node`(또는 `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`)를 씁니다. 그래서 Homebrew로 Node.js를 올려도 깨지지 않습니다. Herdr는 셸 환경 없이 수집기를 실행하므로, 설치 때 찾은 설정 파일, `node`, `codex`, `CODEX_HOME`을 `<Herdr 홈>/usage/install.json`에 기록합니다. 표시 언어도 여기에 기록합니다.
+
+### 표시 언어
+
+하단 바와 팝업은 영어나 한국어로 표시하며, 설치기를 실행할 때 정합니다.
+
+- `--language en` 또는 `--language ko`(`--language=ko`도 가능)는 새 설치든 기존 설치든 언어를 정하고 `install.json`에 저장합니다.
+- 옵션 없이 업데이트하면 저장된 언어를 유지합니다. 0.1.5 이전 설치(화면이 한국어였음)는 한국어를 유지합니다.
+- 새 설치와 완전히 제거한 뒤의 설치는 영어를 씁니다.
+
+나중에 바꾸려면 다른 값으로 설치기를 다시 실행합니다. 예: `node install.mjs --no-activate --language ko`. Herdr가 mod를 제자리에서 다시 불러옵니다. 지금 언어는 `node status.mjs`가 보여 줍니다.
+
+이미 수집한 값도 이전 버전이 저장한 값까지 바로 새 언어로 표시합니다. 서비스나 사용자가 정한 이름(Codex 한도 이름, Claude 설정 폴더 이름, 설치기가 모르는 한도 버킷 ID)은 그대로 표시합니다.
 
 ### 업데이트
 
@@ -195,7 +221,7 @@ claude plugin marketplace update gun-marketplace && claude plugin update herdr-u
 codex plugin marketplace upgrade gun-marketplace && codex plugin add herdr-usage@gun-marketplace
 ```
 
-다시 실행하면 제자리에서 업데이트합니다. 지금 보이는 레이아웃, `gun-usage` 레이아웃을 고친 내용, 저장된 원래 statusLine, 수집한 데이터를 유지하며 래퍼를 두 번 감싸지 않습니다.
+다시 실행하면 제자리에서 업데이트합니다. 표시 언어, 지금 보이는 레이아웃, `gun-usage` 레이아웃을 고친 내용, 저장된 원래 statusLine, 수집한 데이터를 유지하며 래퍼를 두 번 감싸지 않습니다.
 
 Windows 설치기는 기본 native/npm Codex 설치의 `codex.exe`를 찾습니다. 별도 위치라면 `HERDR_USAGE_CODEX`에 절대 경로를 지정하세요(`.cmd`·`.ps1` 런처 제외). Windows는 Node.js 상태줄 래퍼를 쓰고, 임시 app-server 프로세스 트리만 종료합니다. 수집 대상은 이 컴퓨터의 세션과 계정이며 Herdr에서 원격 Mac을 선택해도 바뀌지 않습니다. [Windows 안내](WINDOWS.md)를 참고하세요.
 
@@ -216,7 +242,7 @@ Windows 설치기는 기본 native/npm Codex 설치의 `codex.exe`를 찾습니�
 - Ollama Cloud: 기기 키 `~/.ollama/id_ed25519`로 서명하거나 `OLLAMA_API_KEY`를 Bearer로 보낸 `GET ollama.com/api/balance`
 - Ollama 로컬: HTTP만 사용(`127.0.0.1:11434`). `ollama` CLI는 실행하지 않습니다.
 
-없는 값은 0%나 100%가 아니라 알 수 없음으로, 리셋 시각이 지난 값은 `리셋됨 · 새 값 대기`로 표시합니다. 조회가 실패하면 마지막 정상값과 원래 시각을 유지합니다. 네트워크 조회는 5분에 한 번, 수동 새로고침은 1분에 한 번까지이며 429 `Retry-After`를 따릅니다. 수집값은 허용 목록만 남기므로 기록 경로, 프롬프트 ID, 이메일, 제목, 토큰·비용, 계정 ID, 인증 헤더가 없습니다. 작업 폴더는 이름만, 세션 ID는 해시로 남깁니다.
+없는 값은 0%나 100%가 아니라 알 수 없음으로, 리셋 시각이 지난 값은 `리셋됨 · 새 값 대기`(영어: `Reset · awaiting data`)로 표시합니다. 조회가 실패하면 마지막 정상값과 원래 시각을 유지합니다. 네트워크 조회는 5분에 한 번, 수동 새로고침은 1분에 한 번까지이며 429 `Retry-After`를 따릅니다. 수집값은 허용 목록만 남기므로 기록 경로, 프롬프트 ID, 이메일, 제목, 토큰·비용, 계정 ID, 인증 헤더가 없습니다. 작업 폴더는 이름만, 세션 ID는 해시로 남깁니다.
 
 ### 제거
 

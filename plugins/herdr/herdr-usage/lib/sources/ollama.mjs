@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { windowOf, nowS, toEpochS, errText } from "../util.mjs";
+import { msg } from "../messages.mjs";
 import { ollamaAuthHeader } from "./ollama-sign.mjs";
 
 const LOCAL = process.env.HERDR_USAGE_OLLAMA_LOCAL || "http://127.0.0.1:11434";
@@ -64,21 +65,21 @@ function authHeader(ts) {
 export async function collectOllamaCloud() {
   const ts = nowS();
   let auth;
-  try { auth = authHeader(ts); } catch (e) { return { status: "connect_needed", method: "device-key", groups: [], message_ko: "Ollama 로그인 필요", last_error: errText(e) }; }
-  if (!auth) return { status: "connect_needed", method: "device-key", groups: [], message_ko: "Ollama 로그인 필요 (ollama signin)", last_error: "no key" };
+  try { auth = authHeader(ts); } catch (e) { return { status: "connect_needed", method: "device-key", groups: [], ...msg(["ollama_login"]), last_error: errText(e) }; }
+  if (!auth) return { status: "connect_needed", method: "device-key", groups: [], ...msg(["ollama_signin"]), last_error: "no key" };
   const method = auth.startsWith("Bearer ") ? "api-key" : "device-key";
   try {
     const r = await getJson(`${CLOUD}/api/balance?ts=${ts}`, { headers: { Authorization: auth }, timeoutMs: 15000 });
     auth = null;
-    if (r.status === 200 && r.body) return { status: "ok", method, groups: [groupFromBalance(r.body, nowS())], message_ko: "실시간 조회", last_error: null };
-    if (r.status === 401 || r.status === 403) return { status: "connect_needed", method, groups: [], message_ko: "Ollama 인증 필요", last_error: `HTTP ${r.status}` };
+    if (r.status === 200 && r.body) return { status: "ok", method, groups: [groupFromBalance(r.body, nowS())], ...msg(["live"]), last_error: null };
+    if (r.status === 401 || r.status === 403) return { status: "connect_needed", method, groups: [], ...msg(["ollama_auth"]), last_error: `HTTP ${r.status}` };
     if (r.status === 429) {
       const ra = toRetry(r.retryAfter);
-      return { status: "error", method, groups: [], message_ko: "요청 한도 초과, 잠시 후 재시도", last_error: "HTTP 429", retry_until: nowS() + ra };
+      return { status: "error", method, groups: [], ...msg(["rate_limited"]), last_error: "HTTP 429", retry_until: nowS() + ra };
     }
-    return { status: "error", method, groups: [], message_ko: "Ollama 조회 실패", last_error: `HTTP ${r.status}` };
+    return { status: "error", method, groups: [], ...msg(["ollama_failed"]), last_error: `HTTP ${r.status}` };
   } catch (e) {
-    return { status: "error", method, groups: [], message_ko: "Ollama 조회 실패", last_error: errText(e) };
+    return { status: "error", method, groups: [], ...msg(["ollama_failed"]), last_error: errText(e) };
   }
 }
 

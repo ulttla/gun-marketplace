@@ -11,6 +11,7 @@ import { collectCodex } from "./sources/codex.mjs";
 import { collectClaude } from "./sources/claude.mjs";
 import { collectAgy } from "./sources/agy.mjs";
 import { collectOllamaCloud, localStatus } from "./sources/ollama.mjs";
+import { msg, koText } from "./messages.mjs";
 import { snapshotPath, collectorStatePath, writeAtomic, readJson, nowS, withLock, installInfo } from "./util.mjs";
 
 export const POLL_S = 300;
@@ -46,6 +47,7 @@ export function applyPoll(prevSrc, res, now) {
     fetched_at: now,
     status: res.groups?.length ? res.status : res.status === "connect_needed" ? "connect_needed" : "error",
     method: res.method,
+    message_codes: Array.isArray(res.message_codes) ? res.message_codes : null,
     message_ko: res.message_ko,
     last_error: res.last_error ?? null,
     retry_until: res.retry_until ?? null,
@@ -53,16 +55,20 @@ export function applyPoll(prevSrc, res, now) {
   };
 }
 
+/** Add codes to a message. State written before message_codes existed keeps its Korean text only. */
+function withNotes(codes, ko, notes, name) {
+  if (!notes.length) return { message_codes: codes ?? null, message_ko: ko };
+  return { message_codes: codes ? [...codes, ...notes] : null, message_ko: [ko, koText(notes, name)].filter(Boolean).join(" · ") };
+}
+
 function networkSource(name, st, now) {
   const s = st[name];
-  if (!s) return { status: "unavailable", message_ko: "아직 조회 전", method: null, observed_at: null, fetched_at: null, stale_after_s: STALE[name], last_error: null, groups: [] };
+  if (!s) return { status: "unavailable", ...msg(["not_polled"], name), method: null, observed_at: null, fetched_at: null, stale_after_s: STALE[name], last_error: null, groups: [] };
   const groups = s.last_good?.groups ?? [];
-  let status = s.status;
-  let message = s.message_ko;
-  if (status !== "ok" && groups.length) message = `${message} · 마지막 값 표시`;
+  const status = s.status;
   return {
     status,
-    message_ko: message,
+    ...withNotes(s.message_codes, s.message_ko, status !== "ok" && groups.length ? ["showing_last"] : [], name),
     method: s.last_good?.method ?? s.method,
     observed_at: s.last_good?.observed_at ?? null,
     fetched_at: s.fetched_at,
@@ -74,13 +80,12 @@ function networkSource(name, st, now) {
 
 function statuslineSource(name, captures, installed) {
   const groups = groupsFromCaptures(captures);
-  const label = name === "claude" ? "Claude Code" : "Antigravity";
-  let status = "ok", message = "세션 수신값 (마지막 응답 기준)";
-  if (!installed && !groups.length) { status = "connect_needed"; message = `${label} statusline 연결 필요`; }
-  else if (!groups.length) { status = "unavailable"; message = `${label} 세션 대기 중 (첫 응답 후 표시)`; }
+  let status = "ok", code = "session_value";
+  if (!installed && !groups.length) { status = "connect_needed"; code = "statusline_connect"; }
+  else if (!groups.length) { status = "unavailable"; code = "statusline_waiting"; }
   return {
     status,
-    message_ko: message,
+    ...msg([code], name),
     method: "statusline",
     observed_at: Math.max(0, ...groups.map((g) => g.observed_at ?? 0)) || null,
     fetched_at: Math.max(0, ...captures.map((c) => c.seen_at ?? 0)) || null,
@@ -110,7 +115,7 @@ export function accountSource(name, st, captures, installed, now = nowS()) {
     });
     return partial ? { ...direct, groups,
       observed_at: Math.min(...groups.map((g) => g.observed_at ?? 0)) || null,
-      message_ko: `${direct.message_ko} · 일부 한도는 마지막 세션 값`,
+      ...withNotes(direct.message_codes, direct.message_ko, ["partial_session"], name),
     } : direct;
   }
   if (!st[name]) return fallback;
@@ -119,7 +124,7 @@ export function accountSource(name, st, captures, installed, now = nowS()) {
     groups: fallback.groups,
     observed_at: fallback.observed_at,
     method: fallback.groups.length ? "statusline" : direct.method,
-    message_ko: direct.message_ko + (fallback.groups.length ? " · 마지막 세션 값 표시" : ""),
+    ...withNotes(direct.message_codes, direct.message_ko, fallback.groups.length ? ["showing_last_session"] : [], name),
   };
 }
 

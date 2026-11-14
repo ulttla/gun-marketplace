@@ -1,47 +1,47 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="470" viewBox="0 0 1000 470" font-family="-apple-system, 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif">
-  <title>herdr-usage synthetic preview (made-up numbers)</title>
+  <title>herdr-usage synthetic preview, English interface (made-up numbers)</title>
   <rect width="1000" height="470" fill="#16171b"/>
   <!-- detail popup -->
   <g transform="translate(330,24)">
     <rect width="420" height="370" rx="12" fill="#202228" stroke="#34363e"/>
-    <text x="22" y="36" font-size="15" font-weight="600" fill="#e8e8ec">구독 사용량</text>
-    <text x="398" y="36" font-size="11" fill="#8b8d96" text-anchor="end">새로고침 (r)</text>
+    <text x="22" y="36" font-size="15" font-weight="600" fill="#e8e8ec">Subscription usage</text>
+    <text x="398" y="36" font-size="11" fill="#8b8d96" text-anchor="end">Refresh (r)</text>
     <g font-size="12">
       <!-- Codex -->
       <circle cx="30" cy="70" r="7" fill="#6b8afd"/>
       <text x="44" y="74" fill="#e8e8ec" font-weight="600">Codex</text>
-      <text x="398" y="74" fill="#8b8d96" font-size="10.5" text-anchor="end">실시간 조회 · 2분 전</text>
-      <text x="22" y="100" fill="#a3a5ad">주간</text>
-      <rect x="110" y="92" width="190" height="6" rx="3" fill="#2c2e35"/><rect x="110" y="92" width="129" height="6" rx="3" fill="#6b8afd"/>
-      <text x="398" y="100" fill="#e8e8ec" text-anchor="end">68% 남음 · 32% 사용</text>
-      <text x="110" y="116" fill="#6f717a" font-size="10.5">리셋 11/14 09:30 · 3일 10시간 후</text>
+      <text x="398" y="74" fill="#8b8d96" font-size="10.5" text-anchor="end">Live query · 2 min ago</text>
+      <text x="22" y="100" fill="#a3a5ad">Weekly</text>
+      <rect x="128" y="92" width="130" height="6" rx="3" fill="#2c2e35"/><rect x="128" y="92" width="88" height="6" rx="3" fill="#6b8afd"/>
+      <text x="398" y="100" fill="#e8e8ec" text-anchor="end">68% left · 32% used</text>
+      <text x="128" y="116" fill="#6f717a" font-size="10.5">Resets 11/14 09:30 · in 3 d 10 h</text>
       <!-- Claude -->
       <circle cx="30" cy="148" r="7" fill="#d97757"/>
       <text x="44" y="152" fill="#e8e8ec" font-weight="600">Claude</text>
-      <text x="398" y="152" fill="#8b8d96" font-size="10.5" text-anchor="end">세션 수신 · 5분 전</text>
-      <text x="22" y="178" fill="#a3a5ad">5시간</text>
-      <rect x="110" y="170" width="190" height="6" rx="3" fill="#2c2e35"/><rect x="110" y="170" width="167" height="6" rx="3" fill="#6b8afd"/>
-      <text x="398" y="178" fill="#e8e8ec" text-anchor="end">88% 남음 · 12% 사용</text>
-      <text x="22" y="202" fill="#a3a5ad">주간</text>
-      <rect x="110" y="194" width="190" height="6" rx="3" fill="#2c2e35"/><rect x="110" y="194" width="114" height="6" rx="3" fill="#6b8afd"/>
-      <text x="398" y="202" fill="#e8e8ec" text-anchor="end">60% 남음 · 40% 사용</text>
+      <text x="398" y="152" fill="#8b8d96" font-size="10.5" text-anchor="end">Session data · 5 min ago</text>
+      <text x="22" y="178" fill="#a3a5ad">5-hour</text>
+      <rect x="128" y="170" width="130" height="6" rx="3" fill="#2c2e35"/><rect x="128" y="170" width="114" height="6" rx="3" fill="#6b8afd"/>
+      <text x="398" y="178" fill="#e8e8ec" text-anchor="end">88% left · 12% used</text>
+      <text x="22" y="202" fill="#a3a5ad">Weekly</text>
+      <rect x="128" y="194" width="130" height="6" rx="3" fill="#2c2e35"/><rect x="128" y="194" width="78" height="6" rx="3" fill="#6b8afd"/>
+      <text x="398" y="202" fill="#e8e8ec" text-anchor="end">60% left · 40% used</text>
       <!-- Antigravity -->
       <circle cx="30" cy="234" r="7" fill="#4fb38a"/>
       <text x="44" y="238" fill="#e8e8ec" font-weight="600">Antigravity</text>
-      <text x="398" y="238" fill="#8b8d96" font-size="10.5" text-anchor="end">세션 수신 · 1시간 전</text>
-      <text x="22" y="264" fill="#a3a5ad">Gemini 주간</text>
-      <rect x="110" y="256" width="190" height="6" rx="3" fill="#2c2e35"/><rect x="110" y="256" width="142" height="6" rx="3" fill="#6b8afd"/>
-      <text x="398" y="264" fill="#e8e8ec" text-anchor="end">75% 남음 · 25% 사용</text>
-      <text x="22" y="288" fill="#a3a5ad">Claude·GPT 5시간</text>
-      <rect x="110" y="280" width="190" height="6" rx="3" fill="#2c2e35"/>
-      <text x="398" y="288" fill="#6f717a" text-anchor="end">리셋됨 · 새 값 대기</text>
+      <text x="398" y="238" fill="#8b8d96" font-size="10.5" text-anchor="end">Session data · 1 h ago</text>
+      <text x="22" y="264" fill="#a3a5ad">Gemini weekly</text>
+      <rect x="128" y="256" width="130" height="6" rx="3" fill="#2c2e35"/><rect x="128" y="256" width="98" height="6" rx="3" fill="#6b8afd"/>
+      <text x="398" y="264" fill="#e8e8ec" text-anchor="end">75% left · 25% used</text>
+      <text x="22" y="288" fill="#a3a5ad">Claude·GPT 5-hour</text>
+      <rect x="128" y="280" width="130" height="6" rx="3" fill="#2c2e35"/>
+      <text x="398" y="288" fill="#6f717a" text-anchor="end">Reset · awaiting data</text>
       <!-- Ollama -->
       <circle cx="30" cy="320" r="7" fill="#c9c9cf"/>
       <text x="44" y="324" fill="#e8e8ec" font-weight="600">Ollama</text>
-      <text x="398" y="324" fill="#8b8d96" font-size="10.5" text-anchor="end">실시간 조회 · 4분 전</text>
-      <text x="22" y="350" fill="#a3a5ad">주간</text>
-      <rect x="110" y="342" width="190" height="6" rx="3" fill="#2c2e35"/><rect x="110" y="342" width="179" height="6" rx="3" fill="#6b8afd"/>
-      <text x="398" y="350" fill="#e8e8ec" text-anchor="end">94% 남음 · 6% 사용</text>
+      <text x="398" y="324" fill="#8b8d96" font-size="10.5" text-anchor="end">Live query · 4 min ago</text>
+      <text x="22" y="350" fill="#a3a5ad">Weekly</text>
+      <rect x="128" y="342" width="130" height="6" rx="3" fill="#2c2e35"/><rect x="128" y="342" width="122" height="6" rx="3" fill="#6b8afd"/>
+      <text x="398" y="350" fill="#e8e8ec" text-anchor="end">94% left · 6% used</text>
     </g>
   </g>
   <!-- status bar -->
@@ -52,11 +52,11 @@
     <text x="130" y="24" fill="#a3a5ad">main</text>
     <circle cx="190" cy="20" r="3" fill="#6f717a"/><text x="198" y="24" fill="#a3a5ad">3 agents</text>
     <rect x="356" y="7" width="630" height="24" rx="6" fill="#26282f"/>
-    <text x="372" y="24" fill="#6f717a">컨텍스트</text><text x="424" y="24" fill="#e8e8ec">42%</text>
-    <circle cx="470" cy="20" r="6" fill="#6b8afd"/><text x="482" y="24" fill="#6f717a">주</text><text x="497" y="24" fill="#e8e8ec">68%</text>
-    <circle cx="548" cy="20" r="6" fill="#d97757"/><text x="560" y="24" fill="#6f717a">5h</text><text x="578" y="24" fill="#e8e8ec">88%</text><text x="612" y="24" fill="#6f717a">주</text><text x="627" y="24" fill="#e8e8ec">60%</text>
-    <circle cx="678" cy="20" r="6" fill="#4fb38a"/><text x="690" y="24" fill="#6f717a">Gemini 주</text><text x="748" y="24" fill="#e8e8ec">75%</text>
-    <circle cx="800" cy="20" r="6" fill="#c9c9cf"/><text x="812" y="24" fill="#6f717a">주</text><text x="827" y="24" fill="#e8e8ec">94%</text>
+    <text x="372" y="24" fill="#6f717a">ctx</text><text x="398" y="24" fill="#e8e8ec">42%</text>
+    <circle cx="470" cy="20" r="6" fill="#6b8afd"/><text x="482" y="24" fill="#6f717a">wk</text><text x="502" y="24" fill="#e8e8ec">68%</text>
+    <circle cx="548" cy="20" r="6" fill="#d97757"/><text x="560" y="24" fill="#6f717a">5h</text><text x="578" y="24" fill="#e8e8ec">88%</text><text x="612" y="24" fill="#6f717a">wk</text><text x="632" y="24" fill="#e8e8ec">60%</text>
+    <circle cx="678" cy="20" r="6" fill="#4fb38a"/><text x="690" y="24" fill="#6f717a">Gemini wk</text><text x="752" y="24" fill="#e8e8ec">75%</text>
+    <circle cx="800" cy="20" r="6" fill="#c9c9cf"/><text x="812" y="24" fill="#6f717a">wk</text><text x="832" y="24" fill="#e8e8ec">94%</text>
     <text x="972" y="24" fill="#6f717a" text-anchor="end">made-up numbers</text>
   </g>
 </svg>
