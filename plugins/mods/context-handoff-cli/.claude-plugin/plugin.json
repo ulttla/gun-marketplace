@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "For the terminal: past a context threshold, records a hand-off, then starts a fresh session in the same terminal with /clear and continues the work from the notes",
   "author": {
-    "name": "ulttla"
+    "name": "gunkr-com"
   },
   "userConfig": {
     "enabled": {
