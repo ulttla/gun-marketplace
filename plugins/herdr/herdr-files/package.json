@@ -1,0 +1,14 @@
+{
+  "name": "herdr-files",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT AND Apache-2.0 AND ISC",
+  "description": "Files panel for the Herdr app with folder navigation and guarded Markdown/text editing",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

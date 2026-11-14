@@ -1,0 +1,10 @@
+.claude/
+cache/
+state/
+backups/
+node_modules/
+*.log
+.DS_Store
+# written by herdr-app check / gpui-shell; never published or installed
+/mod/herdr-files/gpui-kit.d.ts
+/mod/herdr-files/jsconfig.json
