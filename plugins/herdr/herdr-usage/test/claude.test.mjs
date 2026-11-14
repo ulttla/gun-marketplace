@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { collectClaude, groupsFromUsage, retryAt } from "../lib/sources/claude.mjs";
+import { collectClaude, claudeLogin, groupsFromUsage, retryAt } from "../lib/sources/claude.mjs";
 
 function account(t, oauth) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "herdr-claude-test-"));
@@ -110,4 +110,36 @@ test("401 after proactive renewal does not rotate credentials twice", async (t) 
   } });
   assert.equal(r.status, "connect_needed");
   assert.equal(calls, 2);
+});
+
+
+test("macOS default login prefers Keychain over a stale credential file", async () => {
+  const file = path.join(os.homedir(), ".claude", ".credentials.json");
+  const oauth = { accessToken: "current-keychain-token" };
+  const result = await claudeLogin(file, { platform: "darwin", keychain: async () => oauth });
+  assert.deepEqual(result, { oauth, keychain: true });
+});
+
+test("custom config never reads the default account Keychain", async (t) => {
+  const a = account(t, { accessToken: "custom-token" });
+  const result = await claudeLogin(a.file, { platform: "darwin", keychain: async () => assert.fail("wrong account") });
+  assert.equal(result.oauth.accessToken, "custom-token");
+  assert.equal(result.keychain, false);
+});
+
+test("Keychain credentials are queried without rotating or copying them", async (t) => {
+  const a = account(t, { accessToken: "stale-file-token" });
+  const before = fs.readFileSync(a.file, "utf8");
+  let calls = 0;
+  const result = await collectClaude({ settingsPath: a.settingsPath,
+    login: async () => ({ keychain: true, oauth: { accessToken: "current-token", refreshToken: "secret", expiresAt: 1 } }),
+    fetcher: async (url, options) => {
+      calls++;
+      assert.ok(url.endsWith("/api/oauth/usage"));
+      assert.equal(options.headers.authorization, "Bearer current-token");
+      return response({}, 401);
+    } });
+  assert.equal(result.status, "connect_needed");
+  assert.equal(calls, 1);
+  assert.equal(fs.readFileSync(a.file, "utf8"), before);
 });

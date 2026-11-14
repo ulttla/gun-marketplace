@@ -98,7 +98,7 @@ A CLI whose config folder does not exist is skipped. If the folder exists but `s
 | Source | How | Shown as |
 | :- | :- | :- |
 | Codex | A short-lived `codex app-server` runs `account/rateLimits/read` (15 s limit; its process group is killed afterwards). If that fails, the newest `rate_limits` event in recent `$CODEX_HOME/sessions` rollouts, with the event's own time | 실시간 조회 / Codex 턴 기록 |
-| Claude Code | Existing local OAuth login queries subscription usage directly; statusline captures remain a fallback and provide context | 실시간 조회 / 세션 수신 |
+| Claude Code | Existing local OAuth login (macOS Keychain or credential file) queries subscription usage directly; statusline captures remain a fallback and provide context | 실시간 조회 / 세션 수신 |
 | Antigravity | The CLI's read-only `-p /usage --output-format json` refreshes quota without an agent turn; statusline captures remain a fallback | 실시간 조회 / 세션 수신 |
 | Ollama Cloud | `GET ollama.com/api/balance`, signed with the device key `~/.ollama/id_ed25519`, or `OLLAMA_API_KEY` as a Bearer token | 실시간 조회 |
 | Ollama local | HTTP only: `127.0.0.1:11434/api/version` and `/api/ps`. The `ollama` CLI is never run | 로컬 실행 중 / 꺼짐 |

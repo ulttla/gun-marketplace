@@ -1,6 +1,8 @@
 // Subscription quota only: no model invocation. Use the installed account's
 // existing OAuth credentials, renewing expired credentials when needed.
 import fs from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
 import os from "node:os";
 import { installInfo, readJson, writeAtomic, hash, nowS, windowOf } from "../util.mjs";
@@ -14,6 +16,26 @@ export function claudeCredentialPath(settingsPath) {
   const recorded = settingsPath || process.env.HERDR_USAGE_CLAUDE_SETTINGS || installInfo().settings?.claude;
   const dir = recorded ? path.dirname(recorded) : process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
   return path.join(dir, ".credentials.json");
+}
+
+// Claude Code on macOS uses Keychain; a leftover credential file may be expired.
+// Read the current login each poll, without copying or rotating Keychain secrets.
+async function readKeychain() {
+  try {
+    const { stdout } = await promisify(execFile)("/usr/bin/security",
+      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      { timeout: 5000, maxBuffer: 64 * 1024 });
+    return JSON.parse(stdout)?.claudeAiOauth ?? null;
+  } catch { return null; }
+}
+
+export async function claudeLogin(file, { platform = process.platform, keychain = readKeychain } = {}) {
+  // Custom config folders must never silently use another account's default login.
+  if (platform === "darwin" && path.dirname(file) === path.join(os.homedir(), ".claude")) {
+    const oauth = await keychain();
+    if (oauth?.accessToken) return { oauth, keychain: true };
+  }
+  return { oauth: readJson(file)?.claudeAiOauth, keychain: false };
 }
 
 export function groupsFromUsage(data, { dir, plan = null, observed = nowS() }) {
@@ -84,20 +106,21 @@ async function renew(file, original, fetcher) {
   } finally { try { fs.rmdirSync(lock); } catch {} }
 }
 
-export async function collectClaude({ settingsPath, fetcher = fetch } = {}) {
+export async function collectClaude({ settingsPath, fetcher = fetch, login = claudeLogin } = {}) {
   const file = claudeCredentialPath(settingsPath);
-  let oauth = readJson(file)?.claudeAiOauth;
+  const current = await login(file);
+  let oauth = current.oauth;
   if (!oauth?.accessToken) return { ...failure(401), last_error: "credentials_missing" };
   try {
     let renewed = false;
-    if (oauth.expiresAt && oauth.expiresAt <= Date.now() + 60000 && oauth.refreshToken) {
+    if (!current.keychain && oauth.expiresAt && oauth.expiresAt <= Date.now() + 60000 && oauth.refreshToken) {
       oauth = await renew(file, oauth, fetcher);
       if (oauth.failure) return oauth.failure;
       renewed = true;
     }
     const get = (token) => fetcher(USAGE_URL, { headers: { authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" }, signal: AbortSignal.timeout(10000) });
     let res = await get(oauth.accessToken);
-    if (res.status === 401 && oauth.refreshToken && !renewed) {
+    if (res.status === 401 && !current.keychain && oauth.refreshToken && !renewed) {
       oauth = await renew(file, oauth, fetcher);
       if (oauth.failure) return oauth.failure;
       res = await get(oauth.accessToken);

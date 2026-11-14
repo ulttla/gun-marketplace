@@ -3,7 +3,7 @@
 // detail dialog. Data comes from ~/.config/herdr-app/usage (the collector).
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, theme, run, window, keys, exec, readTextFile, openOverlay, shared, focused, panes, nextCommand } from "herdr";
+import { spaces, agents, theme, run, window, keys, exec, readTextFile, openOverlay, shared, setShared, focused, panes, nextCommand } from "herdr";
 import { NODE, USAGE_HOME, SOURCES, SHARED_KEY, now, windowState, fmtPct, usedColor, shortLabel, isStale, newest, focusedContext } from "./fmt.js";
 
 export default class GunUsageBar extends View {
@@ -36,7 +36,7 @@ export default class GunUsageBar extends View {
       const r = await exec(NODE, [`${USAGE_HOME}/bin/herdr-usage`, "snapshot", mode], { timeout: 45_000 });
       if (r.code === 0) {
         const s = JSON.parse(r.stdout);
-        if (s?.schema === 1 && !s.busy && s.sources) this.snap = s;
+        if (s?.schema === 1 && !s.busy && s.sources) { this.snap = s; setShared(SHARED_KEY, s); }
       }
     } catch {}
     this.busy = false;
