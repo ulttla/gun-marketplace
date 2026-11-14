@@ -1,7 +1,7 @@
 // Account quota metadata only: no terminal session and no model inference.
 import { execFile } from "node:child_process";
-import path from "node:path";
 import os from "node:os";
+import { findAgy } from "../setup.mjs";
 import { agyWindow } from "../capture.mjs";
 import { nowS, windowOf, installInfo } from "../util.mjs";
 
@@ -33,7 +33,8 @@ function readQuota() {
   return new Promise((resolve, reject) => {
     const recorded = installInfo().agy;
     const agy = process.env.HERDR_USAGE_AGY || (typeof recorded === "string" && recorded) ||
-      path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "agy", "bin", "agy.exe");
+      findAgy();
+    if (!agy) return reject(new Error("quota_command_failed"));
     // Installed 1.5.7 documents /usage as a read-only print command: force-loads
     // current quota, zero agent turns/tokens and no conversation. The CLI owns
     // credential refresh. Never substitute a natural-language prompt here.
@@ -46,9 +47,8 @@ function readQuota() {
   });
 }
 
-export async function collectAgy({ read = readQuota, platform = process.platform, now = nowS } = {}) {
+export async function collectAgy({ read = readQuota, now = nowS } = {}) {
   const base = { method: "quota-api", groups: [], last_error: null };
-  if (platform !== "win32") return { ...base, status: "connect_needed", message_ko: "이 설치의 직접 조회는 Windows 로그인 필요" };
   try {
     const payload = await read();
     const observed = now();

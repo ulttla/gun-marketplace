@@ -138,7 +138,7 @@ export async function buildSnapshot({ mode = "due" } = {}) {
   // retain its working statusline path when file-based OAuth is unavailable.
   const claudeFileLogin = process.platform !== "darwin" || fs.existsSync(path.join(path.dirname(claudeSettingsPath()), ".credentials.json"));
   if (claudeFileLogin && due("claude")) jobs.push(collectClaude({ settingsPath: claudeSettingsPath() }).then((r) => { st.claude = applyPoll(st.claude, r, nowS()); }));
-  if (process.platform === "win32" && due("agy")) jobs.push(collectAgy().then((r) => { st.agy = applyPoll(st.agy, r, nowS()); }));
+  if (due("agy")) jobs.push(collectAgy().then((r) => { st.agy = applyPoll(st.agy, r, nowS()); }));
   if (due("ollama")) jobs.push(collectOllamaCloud().then((r) => { st.ollama = applyPoll(st.ollama, r, nowS()); }));
   const localP = localStatus();
   await Promise.all(jobs);

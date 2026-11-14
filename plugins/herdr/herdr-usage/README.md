@@ -14,6 +14,8 @@ Subscription usage for Codex, Claude Code, Antigravity (agy) and Ollama Cloud in
 
 The status bar keeps everything Herdr's own `workspace-status` shows (machine, branch, agents count, "needs you", the palette hint) and adds how much of each usage window is left, on the right. Click it, or run `herdr-app do gun-usage-bar.open`, for a popup with every window: remaining and used percent, the reset time, when the value was observed, and a manual refresh (`r`). The interface text is in Korean.
 
+With the usage bar open, quota refreshes automatically every 5 minutes, including Antigravity on macOS, Linux and Windows; no conversation is needed.
+
 There is no daemon, no launchd job, no model call and no new API key. It needs no npm packages.
 
 ### Requirements
@@ -97,7 +99,7 @@ A CLI whose config folder does not exist is skipped. If the folder exists but `s
 | :- | :- | :- |
 | Codex | A short-lived `codex app-server` runs `account/rateLimits/read` (15 s limit; its process group is killed afterwards). If that fails, the newest `rate_limits` event in recent `$CODEX_HOME/sessions` rollouts, with the event's own time | 실시간 조회 / Codex 턴 기록 |
 | Claude Code | Existing local OAuth login queries subscription usage directly; statusline captures remain a fallback and provide context | 실시간 조회 / 세션 수신 |
-| Antigravity | On Windows, the CLI's read-only `-p /usage --output-format json` refreshes quota without an agent turn; statusline captures remain a fallback | 실시간 조회 / 세션 수신 |
+| Antigravity | The CLI's read-only `-p /usage --output-format json` refreshes quota without an agent turn; statusline captures remain a fallback | 실시간 조회 / 세션 수신 |
 | Ollama Cloud | `GET ollama.com/api/balance`, signed with the device key `~/.ollama/id_ed25519`, or `OLLAMA_API_KEY` as a Bearer token | 실시간 조회 |
 | Ollama local | HTTP only: `127.0.0.1:11434/api/version` and `/api/ps`. The `ollama` CLI is never run | 로컬 실행 중 / 꺼짐 |
 
@@ -210,7 +212,7 @@ Windows 설치기는 기본 native/npm Codex 설치의 `codex.exe`를 찾습니�
 
 - Codex: 짧게 띄운 `codex app-server`의 `account/rateLimits/read`(15초 제한, 끝나면 프로세스 그룹 종료). 실패하면 최근 `$CODEX_HOME/sessions` 기록의 최신 `rate_limits` 이벤트와 그 이벤트 시각
 - Claude Code: 기존 로컬 OAuth 로그인으로 구독 사용량을 직접 조회. statusLine 값은 예비 경로와 컨텍스트 표시에 사용
-- Antigravity: Windows에서 공식 CLI의 읽기 전용 `-p /usage --output-format json`으로 모델 호출 없이 한도를 새로 조회. statusLine은 예비 경로
+- Antigravity: 공식 CLI의 읽기 전용 `-p /usage --output-format json`으로 모델 호출 없이 한도를 새로 조회. statusLine은 예비 경로
 - Ollama Cloud: 기기 키 `~/.ollama/id_ed25519`로 서명하거나 `OLLAMA_API_KEY`를 Bearer로 보낸 `GET ollama.com/api/balance`
 - Ollama 로컬: HTTP만 사용(`127.0.0.1:11434`). `ollama` CLI는 실행하지 않습니다.
 
