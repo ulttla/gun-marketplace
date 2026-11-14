@@ -143,6 +143,6 @@ export default class GunUsageDetail extends View {
       .child(v_flex().id("scroll").flex_1().min_h(0).gap(10).overflow_y_scrollbar()
         .children(SOURCES.map((src) => this.sourceCard(src, snap?.sources?.[src.id], t, n, snap)))
         .child(ctxCard)
-        .child(div().text_size(10.5).text_color(t.dim).child("남음/사용은 각 서비스가 보고한 값입니다. Claude·Antigravity는 세션이 마지막으로 받은 값이며, 리셋 시간이 지나면 새 값을 기다립니다.")));
+        .child(div().text_size(10.5).text_color(t.dim).child("남음/사용은 각 서비스가 보고한 값입니다. 직접 조회 실패 시 마지막 수신값을 표시합니다. 터미널 컨텍스트는 세션에서 받은 값입니다.")));
   }
 }
