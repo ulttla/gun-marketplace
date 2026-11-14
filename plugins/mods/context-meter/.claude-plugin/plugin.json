@@ -2,7 +2,7 @@
   "name": "context-meter",
   "version": "0.3.0",
   "description": "Shows the git branch, context window usage, what the last turn added, and plan limit usage above the prompt",
-  "author": { "name": "ulttla" },
+  "author": { "name": "gunkr-com" },
   "userConfig": {
     "showBranch": {
       "type": "boolean",

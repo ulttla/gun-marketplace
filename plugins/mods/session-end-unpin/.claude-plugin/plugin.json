@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "description": "Unpins the session from the desktop app's sidebar once you ask to end it and Claude finds nothing left: the end-of-session steps done, no question, decision or follow-up waiting",
   "author": {
-    "name": "ulttla"
+    "name": "gunkr-com"
   },
   "userConfig": {
     "phrases": {

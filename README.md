@@ -1,6 +1,6 @@
 # gun-marketplace
 
-Claude Code and Codex plugins by [ulttla](https://github.com/ulttla). Add the marketplace to your CLI, then install a plugin by name.
+Claude Code and Codex plugins by [gunkr-com](https://github.com/gunkr-com). Add the marketplace to your CLI, then install a plugin by name.
 
 This is an independent personal project. It is not affiliated with, endorsed by, or sponsored by Anthropic. Claude is a trademark of Anthropic, PBC.
 
@@ -31,7 +31,7 @@ A plugin is code that runs with your permissions: it can read and write your fil
 Add the marketplace:
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 ```
 
 Then install a plugin by name, for example:
@@ -40,14 +40,14 @@ Then install a plugin by name, for example:
 claude plugin install context-meter@gun-marketplace
 ```
 
-In a Claude Code session the same commands are `/plugin marketplace add ulttla/gun-marketplace` and `/plugin install context-meter@gun-marketplace`. A plugin loads the next time you start a session; in a session that is already open, run `/reload-plugins`.
+In a Claude Code session the same commands are `/plugin marketplace add gunkr-com/gun-marketplace` and `/plugin install context-meter@gun-marketplace`. A plugin loads the next time you start a session; in a session that is already open, run `/reload-plugins`.
 
 ### Codex plugins
 
 [Codex Context Handoff](plugins/codex/codex-context-handoff) starts a fresh Codex chat in the same Herdr terminal when the active context exceeds 40% and work remains. Existing Herdr workers keep their parent terminal.
 
 ```bash
-codex plugin marketplace add ulttla/gun-marketplace
+codex plugin marketplace add gunkr-com/gun-marketplace
 codex plugin add codex-context-handoff@gun-marketplace
 ```
 
@@ -57,10 +57,10 @@ See the [setup guide](plugins/codex/codex-context-handoff/README.md) for hook re
 
 ### Moving from claude-mod-repo
 
-The mods used to live in [`ulttla/claude-mod-repo`](https://github.com/ulttla/claude-mod-repo), which no longer gets updates. Plugins installed from it keep working as they are. To switch, install each mod again from here, then remove the old one, so it does not run twice:
+The mods used to live in [`gunkr-com/claude-mod-repo`](https://github.com/gunkr-com/claude-mod-repo), which no longer gets updates. Plugins installed from it keep working as they are. To switch, install each mod again from here, then remove the old one, so it does not run twice:
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 claude plugin install context-meter@gun-marketplace
 claude plugin uninstall context-meter@claude-mod-repo
 ```
@@ -102,7 +102,7 @@ Options you set (`/plugin configure`) belong to the old plugin name, so set them
 마켓플레이스를 추가합니다.
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 ```
 
 그다음 플러그인을 이름으로 설치합니다. 예:
@@ -111,14 +111,14 @@ claude plugin marketplace add ulttla/gun-marketplace
 claude plugin install context-meter@gun-marketplace
 ```
 
-Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add ulttla/gun-marketplace`, `/plugin install context-meter@gun-marketplace`로 입력합니다. 플러그인은 다음에 세션을 시작할 때 로드됩니다. 이미 열린 세션에서는 `/reload-plugins`를 실행합니다.
+Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add gunkr-com/gun-marketplace`, `/plugin install context-meter@gun-marketplace`로 입력합니다. 플러그인은 다음에 세션을 시작할 때 로드됩니다. 이미 열린 세션에서는 `/reload-plugins`를 실행합니다.
 
 ### Codex 플러그인
 
 [Codex Context Handoff](plugins/codex/codex-context-handoff)는 컨텍스트 사용량이 40%를 넘고 할 일이 남아 있으면 같은 Herdr 터미널의 새 Codex 대화에서 이어갑니다. 실행 중인 Herdr 워커는 기존 부모 터미널에 연결된 상태로 유지됩니다.
 
 ```bash
-codex plugin marketplace add ulttla/gun-marketplace
+codex plugin marketplace add gunkr-com/gun-marketplace
 codex plugin add codex-context-handoff@gun-marketplace
 ```
 
@@ -128,10 +128,10 @@ codex plugin add codex-context-handoff@gun-marketplace
 
 ### claude-mod-repo에서 옮기기
 
-mod들은 원래 [`ulttla/claude-mod-repo`](https://github.com/ulttla/claude-mod-repo)에 있었고, 그 리포는 더 이상 업데이트되지 않습니다. 거기서 설치한 플러그인은 지금처럼 계속 동작합니다. 옮기려면 각 mod를 여기서 다시 설치한 뒤 옛 것을 제거합니다. 그래야 두 번 실행되지 않습니다.
+mod들은 원래 [`gunkr-com/claude-mod-repo`](https://github.com/gunkr-com/claude-mod-repo)에 있었고, 그 리포는 더 이상 업데이트되지 않습니다. 거기서 설치한 플러그인은 지금처럼 계속 동작합니다. 옮기려면 각 mod를 여기서 다시 설치한 뒤 옛 것을 제거합니다. 그래야 두 번 실행되지 않습니다.
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 claude plugin install context-meter@gun-marketplace
 claude plugin uninstall context-meter@claude-mod-repo
 ```

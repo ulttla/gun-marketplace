@@ -7,7 +7,7 @@ When an opted-in Codex CLI chat crosses 40% of its effective context window, the
 Requires Codex CLI, Herdr CLI (`hc`), and Python 3. The terminal automation uses the English Codex CLI prompt and Herdr's turn counter and status time (`hc get` fields `turn` and `status_ms`, present in Herdr 0.1.20). Tested on macOS with Codex CLI 0.167.2 and Herdr 0.1.20.
 
 ```bash
-codex plugin marketplace add ulttla/gun-marketplace
+codex plugin marketplace add gunkr-com/gun-marketplace
 codex plugin add codex-context-handoff@gun-marketplace
 ```
 

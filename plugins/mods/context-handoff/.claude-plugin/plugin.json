@@ -3,7 +3,7 @@
   "version": "0.6.1",
   "description": "Past a context threshold, records a hand-off and continues the work from the notes: in a new desktop-app session by default, or in this one after a compaction or the app's clear",
   "author": {
-    "name": "ulttla"
+    "name": "gunkr-com"
   },
   "userConfig": {
     "enabled": {

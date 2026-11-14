@@ -1,10 +1,10 @@
 {
   "name": "gun-marketplace",
   "owner": {
-    "name": "ulttla"
+    "name": "gunkr-com"
   },
   "metadata": {
-    "description": "Claude Code plugins by ulttla, grouped by category: mods that change how Claude Code looks and behaves, and herdr integrations"
+    "description": "Claude Code plugins by gunkr-com, grouped by category: mods that change how Claude Code looks and behaves, and herdr integrations"
   },
   "plugins": [
     {

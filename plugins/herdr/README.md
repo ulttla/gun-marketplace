@@ -38,7 +38,7 @@ A shell whose processes listen on a TCP port, such as a dev server, is not count
 #### Install
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 ```
 
 ```bash
@@ -100,7 +100,7 @@ dev 서버처럼 프로세스가 TCP 포트를 열고 대기 중인 셸은 세�
 #### 설치
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 ```
 
 ```bash

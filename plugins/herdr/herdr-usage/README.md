@@ -30,12 +30,12 @@ There is no daemon, no launchd job, no model call and no new API key. It needs n
 The plugin carries a skill, `herdr-usage`, for Claude Code and Codex. Installing the plugin installs nothing in Herdr; ask the agent to "install herdr-usage" and it runs the bundled installer after telling you what changes.
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 claude plugin install herdr-usage@gun-marketplace
 ```
 
 ```bash
-codex plugin marketplace add ulttla/gun-marketplace
+codex plugin marketplace add gunkr-com/gun-marketplace
 codex plugin add herdr-usage@gun-marketplace
 ```
 
@@ -161,12 +161,12 @@ On macOS/Linux, run the command above. On Windows run `node --test test/parse.te
 플러그인에는 Claude Code와 Codex에서 쓰는 `herdr-usage` 스킬이 들어 있습니다. 플러그인을 설치해도 Herdr에는 아무것도 설치되지 않습니다. 에이전트에게 "herdr-usage 설치해 줘"라고 하면 바뀌는 것을 알린 뒤 동봉된 설치기를 실행합니다.
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 claude plugin install herdr-usage@gun-marketplace
 ```
 
 ```bash
-codex plugin marketplace add ulttla/gun-marketplace
+codex plugin marketplace add gunkr-com/gun-marketplace
 codex plugin add herdr-usage@gun-marketplace
 ```
 

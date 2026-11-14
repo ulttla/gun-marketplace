@@ -34,7 +34,7 @@ A mod is code that runs with your permissions: it can read and write your files,
 Add this repository as a marketplace, then install the mods you want:
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 ```
 
 ```bash
@@ -57,7 +57,7 @@ claude plugin install context-handoff-cli@gun-marketplace
 claude plugin install session-end-unpin@gun-marketplace
 ```
 
-In a Claude Code session the same commands are `/plugin marketplace add ulttla/gun-marketplace` and `/plugin install context-meter@gun-marketplace`.
+In a Claude Code session the same commands are `/plugin marketplace add gunkr-com/gun-marketplace` and `/plugin install context-meter@gun-marketplace`.
 
 A mod loads the next time you start a session. In a session that is already open, run `/reload-plugins`.
 
@@ -66,7 +66,7 @@ A mod loads the next time you start a session. In a session that is already open
 Clone the repository and load a mod's folder for one terminal session:
 
 ```bash
-git clone https://github.com/ulttla/gun-marketplace.git
+git clone https://github.com/gunkr-com/gun-marketplace.git
 ```
 
 ```bash
@@ -297,7 +297,7 @@ mod는 사용자 권한으로 실행되는 코드입니다. 파일을 읽고 쓰
 이 리포를 마켓플레이스로 추가한 뒤 원하는 mod를 설치합니다.
 
 ```bash
-claude plugin marketplace add ulttla/gun-marketplace
+claude plugin marketplace add gunkr-com/gun-marketplace
 ```
 
 ```bash
@@ -320,7 +320,7 @@ claude plugin install context-handoff-cli@gun-marketplace
 claude plugin install session-end-unpin@gun-marketplace
 ```
 
-Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add ulttla/gun-marketplace`, `/plugin install context-meter@gun-marketplace`로 입력합니다.
+Claude Code 세션 안에서는 같은 명령을 `/plugin marketplace add gunkr-com/gun-marketplace`, `/plugin install context-meter@gun-marketplace`로 입력합니다.
 
 mod는 다음에 세션을 시작할 때 로드됩니다. 이미 열려 있는 세션에서는 `/reload-plugins`를 실행합니다.
 
@@ -329,7 +329,7 @@ mod는 다음에 세션을 시작할 때 로드됩니다. 이미 열려 있는 �
 리포를 클론한 뒤 터미널 세션 하나에만 mod 폴더를 로드합니다.
 
 ```bash
-git clone https://github.com/ulttla/gun-marketplace.git
+git clone https://github.com/gunkr-com/gun-marketplace.git
 ```
 
 ```bash
