@@ -48,6 +48,12 @@
       "source": "./plugins/herdr/herdr-usage",
       "category": "herdr",
       "description": "Shows Codex, Claude Code, Antigravity and Ollama Cloud subscription usage in the Herdr app's status bar, with a detail popup; its skill installs, updates, checks and removes it"
+    },
+    {
+      "name": "herdr-files",
+      "source": "./plugins/herdr/herdr-files",
+      "category": "herdr",
+      "description": "A Files panel for the Herdr app that goes to parent and other folders and edits local Markdown and text files with an explicit, conflict-guarded Save; its skill installs, checks and removes it"
     }
   ]
 }

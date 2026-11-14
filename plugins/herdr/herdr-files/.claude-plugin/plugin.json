@@ -1,0 +1,11 @@
+{
+  "name": "herdr-files",
+  "version": "0.1.0",
+  "description": "A Files panel for the Herdr app that can go to parent and other folders and edit local Markdown and text files with an explicit, conflict-guarded Save; a bundled skill installs, checks and removes it",
+  "author": {
+    "name": "gunkr-com"
+  },
+  "repository": "https://github.com/gunkr-com/gun-marketplace",
+  "license": "MIT AND Apache-2.0 AND ISC",
+  "keywords": ["herdr", "files", "markdown", "editor", "file-browser"]
+}

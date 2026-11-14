@@ -12,6 +12,7 @@ Plugins that connect Claude Code to [herdr](https://herdr.dev), the terminal and
 | :- | :- |
 | [`herdr-bg-status`](herdr-bg-status) | Keeps a Claude Code session shown as **working** in herdr while its background work still runs after the turn ends |
 | [`herdr-usage`](herdr-usage) | Shows Codex, Claude Code, Antigravity and Ollama Cloud subscription usage in the Herdr app's status bar, with a detail popup |
+| [`herdr-files`](herdr-files) | A Files panel for the Herdr app that goes to parent and other folders and edits local Markdown and text files with an explicit, conflict-guarded Save |
 
 ### herdr-bg-status
 
@@ -66,6 +67,16 @@ claude plugin install herdr-usage@gun-marketplace     # or: codex plugin add her
 
 Then ask the agent to install herdr-usage. Requirements, what it changes, update and uninstall: [herdr-usage/README.md](herdr-usage/README.md).
 
+### herdr-files
+
+Replaces the mod behind the Herdr app's Files panel in a personal layout. The panel gains parent, picked and typed folders, and editing of local Markdown and text files. Nothing is written until you Save, and Save never overwrites a file that changed on disk. Remote, truncated and other files stay read-only. The installer changes only the layout's `files` block and never switches layouts. macOS and Linux. The plugin ships a skill; nothing is installed until you ask for it. It works with Claude Code and Codex.
+
+```bash
+claude plugin install herdr-files@gun-marketplace     # or: codex plugin add herdr-files@gun-marketplace
+```
+
+Then ask the agent to install herdr-files. Requirements, what it changes, limits and uninstall: [herdr-files/README.md](herdr-files/README.md).
+
 ---
 
 ## 한국어
@@ -74,6 +85,7 @@ Then ask the agent to install herdr-usage. Requirements, what it changes, update
 | :- | :- |
 | [`herdr-bg-status`](herdr-bg-status) | 턴이 끝난 뒤에도 백그라운드 작업이 돌고 있으면 herdr에서 Claude Code 세션을 **working**으로 계속 보여 줍니다 |
 | [`herdr-usage`](herdr-usage) | Codex, Claude Code, Antigravity, Ollama Cloud 구독 사용량을 Herdr 앱 하단 바와 상세 팝업에 보여 줍니다 |
+| [`herdr-files`](herdr-files) | Herdr 앱 Files 패널에서 상위·다른 폴더로 이동하고, 로컬 Markdown·텍스트 파일을 편집해 확인을 거쳐 저장합니다 |
 
 ### herdr-bg-status
 
@@ -127,3 +139,13 @@ claude plugin install herdr-usage@gun-marketplace     # 또는: codex plugin add
 ```
 
 그다음 에이전트에게 herdr-usage 설치를 요청합니다. 요구 사항, 바뀌는 것, 업데이트와 제거: [herdr-usage/README.md](herdr-usage/README.md#한국어)
+
+### herdr-files
+
+개인 레이아웃에서 Herdr 앱 Files 패널의 mod를 바꿉니다. 패널에서 상위 폴더, 고른 폴더, 입력한 폴더로 갈 수 있고, 로컬 Markdown·텍스트 파일을 편집할 수 있습니다. Save를 누르기 전에는 쓰지 않고, 디스크에서 바뀐 파일은 덮어쓰지 않습니다. 원격, 잘린 파일, 그 밖의 형식은 읽기 전용입니다. 설치 스크립트는 레이아웃의 `files` 블록만 바꾸고 레이아웃을 전환하지 않습니다. macOS와 Linux용입니다. 플러그인에는 스킬이 들어 있고, 요청하기 전에는 아무것도 설치하지 않습니다. Claude Code와 Codex에서 쓸 수 있습니다.
+
+```bash
+claude plugin install herdr-files@gun-marketplace     # 또는: codex plugin add herdr-files@gun-marketplace
+```
+
+그다음 에이전트에게 herdr-files 설치를 요청합니다. 요구 사항, 바뀌는 것, 한계와 제거: [herdr-files/README.md](herdr-files/README.md#한국어)

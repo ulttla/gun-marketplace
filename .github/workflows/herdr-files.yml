@@ -1,0 +1,41 @@
+name: herdr-files
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/herdr/herdr-files/**"
+      - ".claude-plugin/marketplace.json"
+      - ".agents/plugins/marketplace.json"
+      - ".github/workflows/herdr-files.yml"
+  pull_request:
+    paths:
+      - "plugins/herdr/herdr-files/**"
+      - ".claude-plugin/marketplace.json"
+      - ".agents/plugins/marketplace.json"
+      - ".github/workflows/herdr-files.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Catalogs and manifests
+        run: node plugins/herdr/herdr-files/test/catalog-check.mjs
+      - name: Syntax of the mod and scripts
+        working-directory: plugins/herdr/herdr-files
+        shell: bash
+        run: for f in mod/herdr-files/*.js lib/*.mjs install.mjs uninstall.mjs status.mjs; do node --check "$f"; done
+      - name: Tests (fake file IO, temporary Herdr home, stub herdr-app; no running Herdr)
+        working-directory: plugins/herdr/herdr-files
+        run: node --test test/*.test.mjs
